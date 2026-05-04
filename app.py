@@ -309,11 +309,11 @@ def build_local_report(analysis):
         f'{review_text}'
     )
 
-def call_deepseek(messages, temperature=0.3, max_tokens=800):
+def call_deepseek(messages, temperature=0.3, max_tokens=800, api_key=None):
     """调用DeepSeek快速对话模型"""
-    api_key = os.getenv('DEEPSEEK_API_KEY')
+    api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
     if not api_key:
-        raise RuntimeError('未配置 DEEPSEEK_API_KEY 环境变量')
+        raise RuntimeError('未提供DeepSeek API Key')
 
     payload = {
         'model': os.getenv('DEEPSEEK_MODEL', 'deepseek-v4-flash'),
@@ -791,6 +791,7 @@ def generate_ai_report():
         data = request.get_json() or {}
         analysis = data.get('analysis') or {}
         detections = data.get('detections') or []
+        api_key = (data.get('api_key') or '').strip()
         detection_type = analysis.get('detection_type') or data.get('detection_type') or 'image'
         context = summarize_detection_context(analysis, detections)
 
@@ -814,7 +815,7 @@ def generate_ai_report():
         ]
 
         try:
-            report = call_deepseek(messages, temperature=0.2, max_tokens=700)
+            report = call_deepseek(messages, temperature=0.2, max_tokens=700, api_key=api_key)
             ai_enabled = True
             message = 'AI报告生成成功'
         except Exception as e:
@@ -844,6 +845,7 @@ def chat_with_detection_assistant():
         analysis = data.get('analysis') or {}
         detections = data.get('detections') or []
         history_messages = data.get('messages') or []
+        api_key = (data.get('api_key') or '').strip()
         context = summarize_detection_context(analysis, detections)
 
         messages = [
@@ -871,7 +873,7 @@ def chat_with_detection_assistant():
         messages.append({'role': 'user', 'content': user_message})
 
         try:
-            reply = call_deepseek(messages, temperature=0.4, max_tokens=600)
+            reply = call_deepseek(messages, temperature=0.4, max_tokens=600, api_key=api_key)
             ai_enabled = True
             message = '回答生成成功'
         except Exception as e:

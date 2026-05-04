@@ -253,19 +253,20 @@ DetectionResult
 DeepSeek 使用 OpenAI 兼容接口。
 请求地址是 https://api.deepseek.com/chat/completions。
 模型默认 deepseek-v4-flash。
-API Key 从 DEEPSEEK_API_KEY 环境变量读取。
+API Key 优先使用前端请求传入的 api_key。
+如果前端没有传入，则读取后端环境变量 DEEPSEEK_API_KEY 作为备用。
 ```
 
 重点：
 
 ```python
-api_key = os.getenv('DEEPSEEK_API_KEY')
+api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
 ```
 
 答辩说法：
 
 ```text
-API Key 属于敏感信息，所以没有写死在代码里，而是通过环境变量读取。
+API Key 属于敏感信息，所以没有写死在代码里。系统支持用户在页面首次使用 AI 功能时临时输入，前端保存到 sessionStorage 中，关闭浏览器后失效；后端也保留环境变量作为备用方式。
 ```
 
 ### `/api/detect_image`
@@ -386,7 +387,11 @@ analysis = analyze_video_detections(...)
 ```text
 生成AI报告
 智能问答
+设置API Key
+清除Key
 ```
+
+其中“设置API Key”用于弹窗输入 DeepSeek Key，“清除Key”用于删除当前浏览器会话中保存的 key。
 
 ### 智能问答弹窗
 
@@ -419,6 +424,40 @@ aiReport
 ```
 
 并展示在页面中。
+
+### API Key 弹窗与会话保存
+
+位置：
+
+[Detection.vue](/Users/linky/Desktop/lin/study/实习/web_yolo_recong/frontend/src/views/Detection.vue:499)
+
+作用：
+
+用户第一次使用 AI 功能时，系统弹出对话框输入 DeepSeek API Key。
+
+保存方式：
+
+```javascript
+sessionStorage.setItem('deepseek_api_key', apiKey)
+```
+
+读取方式：
+
+```javascript
+sessionStorage.getItem('deepseek_api_key')
+```
+
+清除方式：
+
+```javascript
+sessionStorage.removeItem('deepseek_api_key')
+```
+
+你要掌握：
+
+```text
+sessionStorage 只在当前浏览器会话有效，关闭浏览器后会失效，比写死在代码里更安全，也方便课程演示。
+```
 
 ### `sendChatMessage`
 
@@ -528,7 +567,15 @@ YOLO 负责输出类别、置信度和坐标等原始检测结果。我负责对
 回答：
 
 ```text
-API Key 是敏感信息，写入代码容易泄露。因此我使用环境变量 DEEPSEEK_API_KEY 读取，保证安全性。
+API Key 是敏感信息，写入代码容易泄露。因此系统没有硬编码密钥。用户首次使用 AI 功能时可以在页面弹窗中输入 key，前端只保存到当前浏览器会话的 sessionStorage 中；后端也支持从环境变量 DEEPSEEK_API_KEY 读取作为备用。
+```
+
+### 为什么用 sessionStorage 保存 API Key？
+
+回答：
+
+```text
+sessionStorage 关闭浏览器后会失效，适合课程演示和本地使用。这样既避免把 API Key 写进源码或提交到 GitHub，也比每次都配置环境变量更方便。
 ```
 
 ### 大模型调用失败怎么办？
@@ -596,7 +643,7 @@ YOLO 检测结果列表。
 3. 登录 `admin / admin123`
 4. 上传图片检测
 5. 讲解智能分析面板
-6. 点击“生成AI报告”
+6. 点击“生成AI报告”，首次使用时输入 DeepSeek API Key
 7. 打开“智能问答”，输入“这次检测结果可靠吗”
 8. 上传短视频检测，讲解视频分析指标
 9. 打开检测历史，讲解历史智能分析
@@ -605,4 +652,4 @@ YOLO 检测结果列表。
 
 摄像头检测不会保存图片或视频，也不会写入历史记录。它只是把当前帧临时发送给后端检测，后端返回检测框后前端实时显示。
 
-DeepSeek API Key 不要提交到代码仓库，也不要写进文档或源码。演示时通过环境变量配置。
+DeepSeek API Key 不要提交到代码仓库，也不要写进文档或源码。演示时推荐通过页面弹窗临时输入；如果使用后端环境变量，也不要把环境变量写入代码文件。

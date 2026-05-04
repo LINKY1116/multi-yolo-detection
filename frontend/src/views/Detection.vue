@@ -260,6 +260,17 @@
                   <el-icon><ChatDotRound /></el-icon>
                   智能问答
                 </el-button>
+                <el-button @click="showApiKeyDialog = true">
+                  设置API Key
+                </el-button>
+                <el-button
+                  v-if="hasDeepseekApiKey"
+                  type="danger"
+                  plain
+                  @click="clearDeepseekApiKey"
+                >
+                  清除Key
+                </el-button>
               </div>
 
               <div v-if="aiReport" class="ai-report">
@@ -481,6 +492,32 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- API Key设置对话框 -->
+    <el-dialog
+      v-model="showApiKeyDialog"
+      title="设置 DeepSeek API Key"
+      width="520px"
+    >
+      <el-alert
+        title="API Key 只会临时保存在当前浏览器会话中，关闭浏览器后失效，不会写入代码。"
+        type="info"
+        show-icon
+        :closable="false"
+        class="api-key-alert"
+      />
+      <el-input
+        v-model="deepseekApiKeyInput"
+        type="password"
+        placeholder="请输入 DeepSeek API Key"
+        show-password
+        clearable
+      />
+      <template #footer>
+        <el-button @click="showApiKeyDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveDeepseekApiKey">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -538,6 +575,9 @@ export default {
       chatMessages: [],
       chatInput: '',
       chatLoading: false,
+      showApiKeyDialog: false,
+      deepseekApiKeyInput: '',
+      hasDeepseekApiKey: false,
       zoomLevel: 1,
       imageWidth: 0,
       imageHeight: 0,
@@ -551,6 +591,9 @@ export default {
       return (this.detectionMode === 'image' && this.imageUrl) ||
              (this.detectionMode === 'video' && this.videoUrl)
     }
+  },
+  mounted() {
+    this.hasDeepseekApiKey = !!sessionStorage.getItem('deepseek_api_key')
   },
   methods: {
     getModeTitle() {
@@ -825,6 +868,40 @@ export default {
       return Number(value || 0).toFixed(2)
     },
 
+    getDeepseekApiKey() {
+      return sessionStorage.getItem('deepseek_api_key') || ''
+    },
+
+    ensureDeepseekApiKey() {
+      if (this.getDeepseekApiKey()) {
+        return true
+      }
+      this.deepseekApiKeyInput = ''
+      this.showApiKeyDialog = true
+      ElMessage.info('请先设置 DeepSeek API Key')
+      return false
+    },
+
+    saveDeepseekApiKey() {
+      const apiKey = this.deepseekApiKeyInput.trim()
+      if (!apiKey) {
+        ElMessage.warning('请输入 DeepSeek API Key')
+        return
+      }
+      sessionStorage.setItem('deepseek_api_key', apiKey)
+      this.hasDeepseekApiKey = true
+      this.deepseekApiKeyInput = ''
+      this.showApiKeyDialog = false
+      ElMessage.success('API Key 已保存到当前浏览器会话')
+    },
+
+    clearDeepseekApiKey() {
+      sessionStorage.removeItem('deepseek_api_key')
+      this.hasDeepseekApiKey = false
+      this.deepseekApiKeyInput = ''
+      ElMessage.success('API Key 已清除')
+    },
+
     resetAiAssistant() {
       this.aiReport = ''
       this.chatMessages = []
@@ -836,6 +913,7 @@ export default {
         ElMessage.warning('请先完成检测')
         return
       }
+      if (!this.ensureDeepseekApiKey()) return
 
       this.aiReportLoading = true
       try {
@@ -847,7 +925,8 @@ export default {
           body: JSON.stringify({
             analysis: this.detectionResult.analysis,
             detections: this.detectionResult.detections || [],
-            detection_type: this.detectionMode
+            detection_type: this.detectionMode,
+            api_key: this.getDeepseekApiKey()
           })
         })
         const data = await response.json()
@@ -874,6 +953,7 @@ export default {
         ElMessage.warning('请先完成检测')
         return
       }
+      if (!this.ensureDeepseekApiKey()) return
 
       if (this.chatMessages.length === 0) {
         this.chatMessages.push({
@@ -902,7 +982,8 @@ export default {
             message: content,
             messages: this.chatMessages.slice(0, -1).filter(item => item.role === 'user' || item.role === 'assistant'),
             analysis: this.detectionResult.analysis,
-            detections: this.detectionResult.detections || []
+            detections: this.detectionResult.detections || [],
+            api_key: this.getDeepseekApiKey()
           })
         })
         const data = await response.json()
@@ -1331,6 +1412,7 @@ export default {
 
 .ai-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
 }
@@ -1471,6 +1553,10 @@ export default {
   grid-template-columns: 1fr 82px;
   gap: 10px;
   align-items: end;
+}
+
+.api-key-alert {
+  margin-bottom: 14px;
 }
 
 .empty-result {
