@@ -11,6 +11,8 @@ import io
 from PIL import Image
 from datetime import datetime
 import json
+import urllib.request
+import urllib.error
 
 app = Flask(__name__)
 
@@ -158,6 +160,194 @@ def analyze_detections(detections, detection_type='image'):
         'reliability': reliability,
         'conclusion': conclusion
     }
+
+def analyze_video_detections(detections, processed_frames, total_frames, detection_interval):
+    """对视频检测结果做结构化统计和视频维度分析"""
+    analysis = analyze_detections(detections, 'video')
+    detected_frames = sorted({detection.get('frame') for detection in detections if detection.get('frame') is not None})
+    sampled_frame_count = len(range(0, processed_frames, detection_interval)) if processed_frames else 0
+    avg_detections_per_sampled_frame = (
+        round(len(detections) / sampled_frame_count, 4)
+        if sampled_frame_count else 0
+    )
+    detected_frame_ratio = (
+        round(len(detected_frames) / sampled_frame_count, 4)
+        if sampled_frame_count else 0
+    )
+
+    if analysis['total_objects'] == 0:
+        conclusion = '视频中未检测到目标，建议检查视频清晰度、拍摄角度或更换检测模型。'
+    elif analysis['review_required']:
+        conclusion = f'视频共处理 {processed_frames} 帧，累计检测到 {analysis["total_objects"]} 次目标，部分检测置信度偏低，建议人工复核关键片段。'
+    else:
+        conclusion = f'视频共处理 {processed_frames} 帧，累计检测到 {analysis["total_objects"]} 次目标，主要类别为 {analysis["main_class"]}，整体检测结果较稳定。'
+
+    analysis.update({
+        'processed_frames': processed_frames,
+        'total_frames': total_frames,
+        'detection_interval': detection_interval,
+        'sampled_frame_count': sampled_frame_count,
+        'detected_frame_count': len(detected_frames),
+        'detected_frame_ratio': detected_frame_ratio,
+        'avg_detections_per_sampled_frame': avg_detections_per_sampled_frame,
+        'conclusion': conclusion
+    })
+
+    return analysis
+
+def analyze_history_records(records):
+    """对用户历史检测记录做统计分析"""
+    total_records = len(records)
+    type_counts = {'image': 0, 'video': 0, 'camera': 0}
+    class_counts = {}
+    record_confidences = []
+    total_objects = 0
+    empty_result_records = 0
+    low_confidence_threshold = 0.6
+    low_confidence_records = 0
+    last_detection_at = None
+
+    for record in records:
+        type_counts[record.detection_type] = type_counts.get(record.detection_type, 0) + 1
+
+        if record.confidence is not None:
+            confidence = float(record.confidence)
+            record_confidences.append(confidence)
+            if confidence < low_confidence_threshold:
+                low_confidence_records += 1
+
+        if last_detection_at is None or record.created_at > last_detection_at:
+            last_detection_at = record.created_at
+
+        detections = []
+        if record.detections:
+            try:
+                detections = json.loads(record.detections)
+            except Exception:
+                detections = []
+
+        if not detections:
+            empty_result_records += 1
+
+        total_objects += len(detections)
+        for detection in detections:
+            class_name = detection.get('class', 'unknown')
+            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+
+    avg_confidence = round(sum(record_confidences) / len(record_confidences), 4) if record_confidences else 0
+    max_confidence = round(max(record_confidences), 4) if record_confidences else 0
+    most_common_class = max(class_counts, key=class_counts.get) if class_counts else None
+    low_confidence_ratio = round(low_confidence_records / total_records, 4) if total_records else 0
+
+    review_required = total_records > 0 and (
+        avg_confidence < low_confidence_threshold or
+        low_confidence_ratio > 0.3 or
+        empty_result_records > 0
+    )
+
+    if total_records == 0:
+        conclusion = '暂无历史检测记录，完成检测后可生成历史分析。'
+    elif review_required:
+        conclusion = f'历史记录中共有 {total_records} 次检测，平均置信度偏低或存在空结果，建议重点复核低置信度记录。'
+    else:
+        conclusion = f'历史记录中共有 {total_records} 次检测，常见目标为 {most_common_class}，整体检测结果较稳定。'
+
+    return {
+        'total_records': total_records,
+        'type_counts': type_counts,
+        'total_objects': total_objects,
+        'class_counts': class_counts,
+        'most_common_class': most_common_class,
+        'avg_confidence': avg_confidence,
+        'max_confidence': max_confidence,
+        'low_confidence_threshold': low_confidence_threshold,
+        'low_confidence_records': low_confidence_records,
+        'low_confidence_ratio': low_confidence_ratio,
+        'empty_result_records': empty_result_records,
+        'review_required': review_required,
+        'last_detection_at': last_detection_at.isoformat() if last_detection_at else None,
+        'conclusion': conclusion
+    }
+
+def summarize_detection_context(analysis, detections):
+    """压缩检测上下文，避免把过长检测列表发给大模型"""
+    detections = detections or []
+    high_confidence_samples = sorted(
+        detections,
+        key=lambda item: item.get('confidence', 0),
+        reverse=True
+    )[:8]
+
+    return {
+        'analysis': analysis or {},
+        'detection_count': len(detections),
+        'top_detections': [
+            {
+                'class': item.get('class'),
+                'confidence': round(float(item.get('confidence', 0)), 4),
+                'bbox': item.get('bbox'),
+                'frame': item.get('frame')
+            }
+            for item in high_confidence_samples
+        ]
+    }
+
+def build_local_report(analysis):
+    """大模型不可用时的本地兜底报告"""
+    if not analysis:
+        return '暂无可分析的检测结果。'
+
+    total_objects = analysis.get('total_objects', 0)
+    avg_confidence = round(analysis.get('avg_confidence', 0) * 100)
+    max_confidence = round(analysis.get('max_confidence', 0) * 100)
+    main_class = analysis.get('main_class') or '暂无主要类别'
+    review_text = '建议人工复核。' if analysis.get('review_required') else '整体结果较可靠。'
+
+    return (
+        f'本次检测共发现 {total_objects} 个目标，主要类别为 {main_class}。'
+        f'平均置信度约 {avg_confidence}%，最高置信度约 {max_confidence}%。'
+        f'{review_text}'
+    )
+
+def call_deepseek(messages, temperature=0.3, max_tokens=800):
+    """调用DeepSeek快速对话模型"""
+    api_key = os.getenv('DEEPSEEK_API_KEY')
+    if not api_key:
+        raise RuntimeError('未配置 DEEPSEEK_API_KEY 环境变量')
+
+    payload = {
+        'model': os.getenv('DEEPSEEK_MODEL', 'deepseek-v4-flash'),
+        'messages': messages,
+        'temperature': temperature,
+        'max_tokens': max_tokens,
+        'stream': False
+    }
+
+    request_data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        'https://api.deepseek.com/chat/completions',
+        data=request_data,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {api_key}'
+        },
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            response_data = json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='ignore')
+        raise RuntimeError(f'DeepSeek接口返回错误: {e.code} {error_body}')
+    except Exception as e:
+        raise RuntimeError(f'DeepSeek接口调用失败: {str(e)}')
+
+    choices = response_data.get('choices', [])
+    if not choices:
+        raise RuntimeError('DeepSeek接口未返回有效内容')
+
+    return choices[0].get('message', {}).get('content', '').strip()
 
 # API路由
 @app.route('/api/<path:path>', methods=['OPTIONS'])
@@ -482,6 +672,13 @@ def detect_video():
 
             print(f"✅ 视频处理完成: {result_filename} ({file_size} bytes)")
 
+            analysis = analyze_video_detections(
+                all_detections,
+                processed_frames,
+                total_frames,
+                detection_interval
+            )
+
             # 保存到数据库
             detection_result = DetectionResult(
                 user_id=user_id,
@@ -501,7 +698,8 @@ def detect_video():
                 'result_video': f'/static/{result_filename}',
                 'detection_count': len(all_detections),
                 'processed_frames': processed_frames,
-                'total_detections': len(all_detections)
+                'total_detections': len(all_detections),
+                'analysis': analysis
             })
 
         except Exception as e:
@@ -570,6 +768,129 @@ def process_frame():
 
     except Exception as e:
         return jsonify({'success': False, 'message': f'帧处理失败: {str(e)}'}), 500
+
+@app.route('/api/analysis/history/<int:user_id>')
+def get_history_analysis(user_id):
+    """获取用户历史检测智能分析"""
+    try:
+        records = DetectionResult.query.filter_by(user_id=user_id).all()
+        analysis = analyze_history_records(records)
+
+        return jsonify({
+            'success': True,
+            'analysis': analysis
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'获取历史分析失败: {str(e)}'}), 500
+
+@app.route('/api/analysis/report', methods=['POST'])
+def generate_ai_report():
+    """基于当前检测结果生成自然语言报告"""
+    try:
+        data = request.get_json() or {}
+        analysis = data.get('analysis') or {}
+        detections = data.get('detections') or []
+        detection_type = analysis.get('detection_type') or data.get('detection_type') or 'image'
+        context = summarize_detection_context(analysis, detections)
+
+        messages = [
+            {
+                'role': 'system',
+                'content': (
+                    '你是目标检测系统中的AI分析助手。'
+                    '请基于YOLO检测统计结果，用中文生成简洁、专业、面向普通用户的检测报告。'
+                    '报告包含：检测概况、可信度判断、主要目标、复核建议。'
+                    '不要编造没有出现在数据中的目标。'
+                )
+            },
+            {
+                'role': 'user',
+                'content': json.dumps({
+                    'detection_type': detection_type,
+                    'context': context
+                }, ensure_ascii=False)
+            }
+        ]
+
+        try:
+            report = call_deepseek(messages, temperature=0.2, max_tokens=700)
+            ai_enabled = True
+            message = 'AI报告生成成功'
+        except Exception as e:
+            report = build_local_report(analysis)
+            ai_enabled = False
+            message = f'大模型暂不可用，已生成本地基础报告：{str(e)}'
+
+        return jsonify({
+            'success': True,
+            'report': report,
+            'ai_enabled': ai_enabled,
+            'message': message
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'生成AI报告失败: {str(e)}'}), 500
+
+@app.route('/api/analysis/chat', methods=['POST'])
+def chat_with_detection_assistant():
+    """围绕当前检测结果进行多轮问答"""
+    try:
+        data = request.get_json() or {}
+        user_message = (data.get('message') or '').strip()
+        if not user_message:
+            return jsonify({'success': False, 'message': '请输入问题'}), 400
+
+        analysis = data.get('analysis') or {}
+        detections = data.get('detections') or []
+        history_messages = data.get('messages') or []
+        context = summarize_detection_context(analysis, detections)
+
+        messages = [
+            {
+                'role': 'system',
+                'content': (
+                    '你是YOLO目标检测系统里的智能问答助手。'
+                    '你只能根据当前检测结果、统计分析和用户问题进行回答。'
+                    '如果数据不足，要明确说明不能确定，并给出合理的复核或拍摄建议。'
+                    '回答保持简洁，不使用思考过程。'
+                )
+            },
+            {
+                'role': 'system',
+                'content': '当前检测上下文：' + json.dumps(context, ensure_ascii=False)
+            }
+        ]
+
+        for item in history_messages[-8:]:
+            role = item.get('role')
+            content = item.get('content')
+            if role in ['user', 'assistant'] and content:
+                messages.append({'role': role, 'content': content})
+
+        messages.append({'role': 'user', 'content': user_message})
+
+        try:
+            reply = call_deepseek(messages, temperature=0.4, max_tokens=600)
+            ai_enabled = True
+            message = '回答生成成功'
+        except Exception as e:
+            reply = (
+                build_local_report(analysis) +
+                ' 目前大模型问答不可用，请检查 DEEPSEEK_API_KEY 配置或网络连接。'
+            )
+            ai_enabled = False
+            message = f'大模型暂不可用，已返回本地回答：{str(e)}'
+
+        return jsonify({
+            'success': True,
+            'reply': reply,
+            'ai_enabled': ai_enabled,
+            'message': message
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'智能问答失败: {str(e)}'}), 500
 
 @app.route('/api/history/<int:user_id>')
 def get_history(user_id):

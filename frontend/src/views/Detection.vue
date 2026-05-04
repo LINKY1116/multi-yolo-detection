@@ -247,6 +247,45 @@
                 {{ detectionResult.analysis.conclusion }}
               </div>
 
+              <div class="ai-actions">
+                <el-button
+                  type="primary"
+                  :loading="aiReportLoading"
+                  @click="generateAiReport"
+                >
+                  <el-icon><Document /></el-icon>
+                  生成AI报告
+                </el-button>
+                <el-button @click="openChatDialog">
+                  <el-icon><ChatDotRound /></el-icon>
+                  智能问答
+                </el-button>
+              </div>
+
+              <div v-if="aiReport" class="ai-report">
+                <div class="ai-report-title">AI自然语言报告</div>
+                <div class="ai-report-content">{{ aiReport }}</div>
+              </div>
+
+              <div v-if="detectionResult.analysis.detection_type === 'video'" class="video-analysis-details">
+                <div class="video-metric">
+                  <span class="video-metric-value">{{ detectionResult.analysis.processed_frames }}</span>
+                  <span class="video-metric-label">处理帧数</span>
+                </div>
+                <div class="video-metric">
+                  <span class="video-metric-value">{{ detectionResult.analysis.sampled_frame_count }}</span>
+                  <span class="video-metric-label">采样帧数</span>
+                </div>
+                <div class="video-metric">
+                  <span class="video-metric-value">{{ detectionResult.analysis.detected_frame_count }}</span>
+                  <span class="video-metric-label">有目标帧数</span>
+                </div>
+                <div class="video-metric">
+                  <span class="video-metric-value">{{ formatNumber(detectionResult.analysis.avg_detections_per_sampled_frame) }}</span>
+                  <span class="video-metric-label">平均目标/采样帧</span>
+                </div>
+              </div>
+
               <div v-if="Object.keys(detectionResult.analysis.class_counts || {}).length > 0" class="class-distribution">
                 <span class="distribution-title">类别分布</span>
                 <div class="class-tags">
@@ -401,6 +440,47 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 智能问答对话框 -->
+    <el-dialog
+      v-model="showChatDialog"
+      title="检测结果智能问答"
+      width="680px"
+      destroy-on-close
+    >
+      <div class="chat-panel">
+        <div class="chat-messages" ref="chatMessagesBox">
+          <div
+            v-for="(message, index) in chatMessages"
+            :key="index"
+            class="chat-message"
+            :class="message.role"
+          >
+            <div class="chat-bubble">{{ message.content }}</div>
+          </div>
+          <div v-if="chatLoading" class="chat-message assistant">
+            <div class="chat-bubble">正在分析当前检测结果...</div>
+          </div>
+        </div>
+
+        <div class="chat-input-row">
+          <el-input
+            v-model="chatInput"
+            type="textarea"
+            :rows="2"
+            placeholder="例如：这次检测结果可靠吗？为什么建议复核？"
+            @keyup.enter.exact.prevent="sendChatMessage"
+          />
+          <el-button
+            type="primary"
+            :loading="chatLoading"
+            @click="sendChatMessage"
+          >
+            发送
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -415,7 +495,9 @@ import {
   RefreshRight,
   ZoomIn,
   ZoomOut,
-  Download
+  Download,
+  Document,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 
 export default {
@@ -429,7 +511,9 @@ export default {
     RefreshRight,
     ZoomIn,
     ZoomOut,
-    Download
+    Download,
+    Document,
+    ChatDotRound
   },
   data() {
     return {
@@ -448,6 +532,12 @@ export default {
       showVideoPreview: false,
       previewImageUrl: '',
       previewVideoUrl: '',
+      aiReport: '',
+      aiReportLoading: false,
+      showChatDialog: false,
+      chatMessages: [],
+      chatInput: '',
+      chatLoading: false,
       zoomLevel: 1,
       imageWidth: 0,
       imageHeight: 0,
@@ -477,6 +567,7 @@ export default {
       this.silentStopCamera()
       this.resetUpload()
       this.detectionResult = {}
+      this.resetAiAssistant()
     },
 
     // 图片上传相关
@@ -502,6 +593,7 @@ export default {
       if (response.success) {
         // 确保结果稳定显示
         this.detectionResult = { ...response }
+        this.resetAiAssistant()
         ElMessage.success('图片检测完成')
       } else {
         ElMessage.error(response.message)
@@ -531,6 +623,7 @@ export default {
       if (response.success) {
         // 确保结果稳定显示
         this.detectionResult = { ...response }
+        this.resetAiAssistant()
         ElMessage.success(`视频检测完成！处理了 ${response.processed_frames || 0} 帧，检测到 ${response.total_detections || 0} 个目标`)
       } else {
         ElMessage.error(response.message)
@@ -702,6 +795,7 @@ export default {
       this.imageUrl = ''
       this.videoUrl = ''
       this.detectionResult = {}
+      this.resetAiAssistant()
     },
 
     resetAll() {
@@ -725,6 +819,114 @@ export default {
 
     formatPercent(value) {
       return `${Math.round((value || 0) * 100)}%`
+    },
+
+    formatNumber(value) {
+      return Number(value || 0).toFixed(2)
+    },
+
+    resetAiAssistant() {
+      this.aiReport = ''
+      this.chatMessages = []
+      this.chatInput = ''
+    },
+
+    async generateAiReport() {
+      if (!this.detectionResult.analysis) {
+        ElMessage.warning('请先完成检测')
+        return
+      }
+
+      this.aiReportLoading = true
+      try {
+        const response = await fetch('/api/analysis/report', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            analysis: this.detectionResult.analysis,
+            detections: this.detectionResult.detections || [],
+            detection_type: this.detectionMode
+          })
+        })
+        const data = await response.json()
+
+        if (data.success) {
+          this.aiReport = data.report
+          if (data.ai_enabled) {
+            ElMessage.success('AI报告生成成功')
+          } else {
+            ElMessage.warning(data.message || '已生成本地基础报告')
+          }
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (error) {
+        ElMessage.error('AI报告生成失败: ' + error.message)
+      } finally {
+        this.aiReportLoading = false
+      }
+    },
+
+    openChatDialog() {
+      if (!this.detectionResult.analysis) {
+        ElMessage.warning('请先完成检测')
+        return
+      }
+
+      if (this.chatMessages.length === 0) {
+        this.chatMessages.push({
+          role: 'assistant',
+          content: '你好，我可以根据当前检测结果回答问题，比如检测是否可靠、为什么建议复核、主要目标是什么。'
+        })
+      }
+      this.showChatDialog = true
+    },
+
+    async sendChatMessage() {
+      const content = this.chatInput.trim()
+      if (!content || this.chatLoading) return
+
+      this.chatMessages.push({ role: 'user', content })
+      this.chatInput = ''
+      this.chatLoading = true
+
+      try {
+        const response = await fetch('/api/analysis/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: content,
+            messages: this.chatMessages.slice(0, -1).filter(item => item.role === 'user' || item.role === 'assistant'),
+            analysis: this.detectionResult.analysis,
+            detections: this.detectionResult.detections || []
+          })
+        })
+        const data = await response.json()
+
+        if (data.success) {
+          this.chatMessages.push({
+            role: 'assistant',
+            content: data.reply
+          })
+          if (!data.ai_enabled) {
+            ElMessage.warning(data.message || '当前返回的是本地基础回答')
+          }
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (error) {
+        ElMessage.error('智能问答失败: ' + error.message)
+      } finally {
+        this.chatLoading = false
+        this.$nextTick(() => {
+          const box = this.$refs.chatMessagesBox
+          if (box) box.scrollTop = box.scrollHeight
+        })
+      }
     },
 
     getDetectionBoxStyle(detection) {
@@ -1127,6 +1329,63 @@ export default {
   line-height: 1.6;
 }
 
+.ai-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ai-report {
+  margin-top: 14px;
+  padding: 12px;
+  background: white;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
+}
+
+.ai-report-title {
+  margin-bottom: 8px;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.ai-report-content {
+  color: #303133;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.video-analysis-details {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.video-metric {
+  min-height: 62px;
+  padding: 8px 6px;
+  background: white;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.video-metric-value {
+  display: block;
+  color: #67c23a;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 24px;
+}
+
+.video-metric-label {
+  display: block;
+  margin-top: 4px;
+  color: #606266;
+  font-size: 12px;
+}
+
 .class-distribution {
   margin-top: 14px;
 }
@@ -1158,6 +1417,60 @@ export default {
   font-family: monospace;
   font-size: 12px;
   color: #666;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chat-messages {
+  height: 360px;
+  padding: 12px;
+  overflow-y: auto;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+}
+
+.chat-message {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+.chat-message.user {
+  justify-content: flex-end;
+}
+
+.chat-message.assistant {
+  justify-content: flex-start;
+}
+
+.chat-bubble {
+  max-width: 78%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.chat-message.user .chat-bubble {
+  color: white;
+  background: #409eff;
+}
+
+.chat-message.assistant .chat-bubble {
+  color: #303133;
+  background: white;
+  border: 1px solid #e4e7ed;
+}
+
+.chat-input-row {
+  display: grid;
+  grid-template-columns: 1fr 82px;
+  gap: 10px;
+  align-items: end;
 }
 
 .empty-result {

@@ -5,18 +5,18 @@
         <div class="card-header">
           <span>检测历史记录</span>
           <div class="header-actions">
-            <el-button 
-              type="danger" 
-              @click="clearAllHistory" 
+            <el-button
+              type="danger"
+              @click="clearAllHistory"
               :disabled="history.length === 0"
               v-if="history.length > 0"
             >
               <el-icon><Delete /></el-icon>
               清空所有
             </el-button>
-            <el-button 
-              type="warning" 
-              @click="batchDelete" 
+            <el-button
+              type="warning"
+              @click="batchDelete"
               :disabled="selectedRows.length === 0"
               v-if="selectedRows.length > 0"
             >
@@ -30,7 +30,7 @@
           </div>
         </div>
       </template>
-      
+
       <div class="history-content">
         <!-- 统计信息 -->
         <div class="stats-row" v-if="history.length > 0">
@@ -49,17 +49,83 @@
             </el-col>
           </el-row>
         </div>
-        
+
+        <!-- 历史智能分析 -->
+        <div class="history-analysis-panel" v-if="historyAnalysis">
+          <div class="analysis-header">
+            <h4>历史智能分析</h4>
+            <el-tag :type="historyAnalysis.review_required ? 'warning' : 'success'">
+              {{ historyAnalysis.review_required ? '存在需复核记录' : '整体稳定' }}
+            </el-tag>
+          </div>
+
+          <el-row :gutter="12" class="analysis-stats">
+            <el-col :span="6">
+              <div class="analysis-stat">
+                <span class="stat-value">{{ historyAnalysis.total_records }}</span>
+                <span class="stat-label">历史检测次数</span>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="analysis-stat">
+                <span class="stat-value">{{ formatPercent(historyAnalysis.avg_confidence) }}</span>
+                <span class="stat-label">历史平均置信度</span>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="analysis-stat">
+                <span class="stat-value">{{ historyAnalysis.low_confidence_records }}</span>
+                <span class="stat-label">低置信度记录</span>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="analysis-stat">
+                <span class="stat-value">{{ historyAnalysis.total_objects }}</span>
+                <span class="stat-label">累计目标数</span>
+              </div>
+            </el-col>
+          </el-row>
+
+          <div class="analysis-conclusion">
+            {{ historyAnalysis.conclusion }}
+          </div>
+
+          <div class="analysis-details">
+            <div class="detail-group">
+              <span class="detail-title">检测类型</span>
+              <div class="detail-tags">
+                <el-tag type="primary" effect="plain">图片 × {{ historyAnalysis.type_counts?.image || 0 }}</el-tag>
+                <el-tag type="success" effect="plain">视频 × {{ historyAnalysis.type_counts?.video || 0 }}</el-tag>
+                <el-tag type="warning" effect="plain">摄像头 × {{ historyAnalysis.type_counts?.camera || 0 }}</el-tag>
+              </div>
+            </div>
+
+            <div class="detail-group" v-if="Object.keys(historyAnalysis.class_counts || {}).length > 0">
+              <span class="detail-title">常见类别</span>
+              <div class="detail-tags">
+                <el-tag
+                  v-for="(count, className) in historyAnalysis.class_counts"
+                  :key="className"
+                  type="info"
+                  effect="plain"
+                >
+                  {{ className }} × {{ count }}
+                </el-tag>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 历史记录表格 -->
-        <el-table 
-          :data="paginatedHistory" 
-          style="width: 100%" 
+        <el-table
+          :data="paginatedHistory"
+          style="width: 100%"
           v-loading="$store.state.isLoading"
           empty-text="暂无检测历史"
           @selection-change="handleSelectionChange"
         >
           <el-table-column type="selection" width="55" />
-          
+
           <el-table-column label="检测时间" width="180">
             <template #default="scope">
               <div class="time-info">
@@ -68,7 +134,7 @@
               </div>
             </template>
           </el-table-column>
-          
+
           <el-table-column label="检测类型" width="120">
             <template #default="scope">
               <el-tag :type="getTypeTagType(scope.row.detection_type)">
@@ -76,7 +142,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          
+
           <el-table-column label="原始文件" width="200">
             <template #default="scope">
               <div class="file-info" v-if="scope.row.original_file">
@@ -86,7 +152,7 @@
               <span v-else class="no-file">实时检测</span>
             </template>
           </el-table-column>
-          
+
           <el-table-column label="检测结果" width="150">
             <template #default="scope">
               <div class="result-info">
@@ -99,10 +165,10 @@
               </div>
             </template>
           </el-table-column>
-          
+
           <el-table-column label="最高置信度" width="150">
             <template #default="scope">
-              <el-progress 
+              <el-progress
                 v-if="scope.row.confidence"
                 :percentage="Math.round(scope.row.confidence * 100)"
                 :stroke-width="8"
@@ -111,20 +177,20 @@
               <span v-else>--</span>
             </template>
           </el-table-column>
-          
+
           <el-table-column label="操作" width="250">
             <template #default="scope">
               <el-button-group>
-                <el-button 
-                  size="small" 
+                <el-button
+                  size="small"
                   @click="viewDetails(scope.row)"
                   :disabled="!scope.row.detections || scope.row.detections.length === 0"
                 >
                   <el-icon><View /></el-icon>
                   查看详情
                 </el-button>
-                <el-button 
-                  size="small" 
+                <el-button
+                  size="small"
                   type="primary"
                   @click="downloadResult(scope.row)"
                   :disabled="!scope.row.result_file"
@@ -132,8 +198,8 @@
                   <el-icon><Download /></el-icon>
                   下载结果
                 </el-button>
-                <el-button 
-                  size="small" 
+                <el-button
+                  size="small"
                   type="danger"
                   @click="deleteRecord(scope.row)"
                 >
@@ -144,7 +210,7 @@
             </template>
           </el-table-column>
         </el-table>
-        
+
         <!-- 分页 -->
         <div class="pagination-container" v-if="history.length > pageSize">
           <el-pagination
@@ -157,11 +223,11 @@
         </div>
       </div>
     </el-card>
-    
+
     <!-- 详情对话框 -->
-    <el-dialog 
-      v-model="showDetails" 
-      title="检测详情" 
+    <el-dialog
+      v-model="showDetails"
+      title="检测详情"
       width="80%"
       destroy-on-close
     >
@@ -191,18 +257,18 @@
               </el-descriptions>
             </div>
           </el-col>
-          
+
           <el-col :span="12">
             <div class="result-preview" v-if="selectedRecord.result_file">
               <h4>结果预览</h4>
               <div class="preview-container">
-                <img 
+                <img
                   v-if="isImageFile(selectedRecord.result_file)"
-                  :src="getResultFileUrl(selectedRecord.result_file)" 
+                  :src="getResultFileUrl(selectedRecord.result_file)"
                   class="preview-image"
                   alt="检测结果"
                 />
-                <video 
+                <video
                   v-else-if="isVideoFile(selectedRecord.result_file)"
                   :src="getResultFileUrl(selectedRecord.result_file)"
                   class="preview-video"
@@ -214,7 +280,7 @@
             </div>
           </el-col>
         </el-row>
-        
+
         <!-- 检测详情列表 -->
         <div class="detection-details" v-if="selectedRecord.detections && selectedRecord.detections.length > 0">
           <h4>检测详情</h4>
@@ -223,8 +289,8 @@
             <el-table-column prop="class" label="类别" width="150" />
             <el-table-column label="置信度" width="150">
               <template #default="scope">
-                <el-progress 
-                  :percentage="Math.round(scope.row.confidence * 100)" 
+                <el-progress
+                  :percentage="Math.round(scope.row.confidence * 100)"
                   :stroke-width="8"
                   :color="getConfidenceColor(scope.row.confidence)"
                 />
@@ -251,11 +317,11 @@
 
 <script>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Refresh, 
-  Clock, 
-  Document, 
-  View, 
+import {
+  Refresh,
+  Clock,
+  Document,
+  View,
   Download,
   Delete
 } from '@element-plus/icons-vue'
@@ -276,7 +342,8 @@ export default {
       pageSize: 10,
       showDetails: false,
       selectedRecord: null,
-      selectedRows: []
+      selectedRows: [],
+      historyAnalysis: null
     }
   },
   computed: {
@@ -299,24 +366,47 @@ export default {
         if (!result.success) {
           ElMessage.error(result.message)
         }
+        await this.fetchHistoryAnalysis()
       } catch (error) {
         ElMessage.error('获取历史记录失败')
       }
     },
-    
+
+    async fetchHistoryAnalysis() {
+      const currentUser = this.$store.getters.currentUser
+      if (!currentUser?.id) return
+
+      try {
+        const response = await fetch(`/api/analysis/history/${currentUser.id}`)
+        const data = await response.json()
+
+        if (data.success) {
+          this.historyAnalysis = data.analysis
+        } else {
+          ElMessage.error(data.message)
+        }
+      } catch (error) {
+        ElMessage.error('获取历史智能分析失败')
+      }
+    },
+
+    formatPercent(value) {
+      return `${Math.round((value || 0) * 100)}%`
+    },
+
     getCountByType(type) {
       return this.history.filter(item => item.detection_type === type).length
     },
-    
+
     getTypeLabel(type) {
       const labels = {
         image: '图片检测',
-        video: '视频检测', 
+        video: '视频检测',
         camera: '摄像头检测'
       }
       return labels[type] || type
     },
-    
+
     getTypeTagType(type) {
       const types = {
         image: 'primary',
@@ -325,7 +415,7 @@ export default {
       }
       return types[type] || 'info'
     },
-    
+
     formatTime(timeString) {
       const date = new Date(timeString)
       return date.toLocaleString('zh-CN', {
@@ -337,23 +427,23 @@ export default {
         second: '2-digit'
       })
     },
-    
+
     getConfidenceColor(confidence) {
       if (confidence >= 0.8) return '#67c23a'
       if (confidence >= 0.6) return '#e6a23c'
       return '#f56c6c'
     },
-    
+
     formatBbox(bbox) {
       if (!bbox || bbox.length !== 4) return '--'
       return `(${Math.round(bbox[0])}, ${Math.round(bbox[1])}) - (${Math.round(bbox[2])}, ${Math.round(bbox[3])})`
     },
-    
+
     viewDetails(record) {
       this.selectedRecord = record
       this.showDetails = true
     },
-    
+
     downloadResult(record) {
       if (record.result_file) {
         const url = this.getResultFileUrl(record.result_file)
@@ -368,29 +458,29 @@ export default {
         ElMessage.warning('没有可下载的结果文件')
       }
     },
-    
+
     getResultFileUrl(filename) {
       return `/static/${filename}`
     },
-    
+
     isImageFile(filename) {
       const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
       return imageExts.some(ext => filename.toLowerCase().endsWith(ext))
     },
-    
+
     isVideoFile(filename) {
       const videoExts = ['.mp4', '.avi', '.mov', '.mkv']
       return videoExts.some(ext => filename.toLowerCase().endsWith(ext))
     },
-    
+
     handlePageChange(page) {
       this.currentPage = page
     },
-    
+
     handleSelectionChange(selection) {
       this.selectedRows = selection.map(item => item.id)
     },
-    
+
     async deleteRecord(record) {
       try {
         await ElMessageBox.confirm(
@@ -403,33 +493,33 @@ export default {
             dangerouslyUseHTMLString: true
           }
         )
-        
+
         const response = await fetch(`/api/history/delete/${record.id}`, {
           method: 'DELETE'
         })
-        
+
         const data = await response.json()
-        
+
         if (data.success) {
           ElMessage.success(data.message)
           await this.refreshHistory()
         } else {
           ElMessage.error(data.message)
         }
-        
+
       } catch (error) {
         if (error !== 'cancel') {
           ElMessage.error('删除记录失败: ' + error.message)
         }
       }
     },
-    
+
     async batchDelete() {
       if (this.selectedRows.length === 0) {
         ElMessage.warning('请先选择要删除的记录')
         return
       }
-      
+
       try {
         await ElMessageBox.confirm(
           `确定要删除选中的 ${this.selectedRows.length} 条检测记录吗？\n此操作不可恢复`,
@@ -440,7 +530,7 @@ export default {
             type: 'warning'
           }
         )
-        
+
         const currentUser = this.$store.getters.currentUser
         const response = await fetch('/api/history/batch-delete', {
           method: 'DELETE',
@@ -452,9 +542,9 @@ export default {
             user_id: currentUser?.id || 1
           })
         })
-        
+
         const data = await response.json()
-        
+
         if (data.success) {
           ElMessage.success(data.message)
           this.selectedRows = []
@@ -462,20 +552,20 @@ export default {
         } else {
           ElMessage.error(data.message)
         }
-        
+
       } catch (error) {
         if (error !== 'cancel') {
           ElMessage.error('批量删除失败: ' + error.message)
         }
       }
     },
-    
+
     async clearAllHistory() {
       if (this.history.length === 0) {
         ElMessage.info('没有需要清空的记录')
         return
       }
-      
+
       try {
         await ElMessageBox.confirm(
           `确定要清空所有检测历史记录吗？\n这将删除 ${this.history.length} 条记录和相关文件\n此操作不可恢复`,
@@ -486,14 +576,14 @@ export default {
             type: 'error'
           }
         )
-        
+
         const currentUser = this.$store.getters.currentUser
         const response = await fetch(`/api/history/clear/${currentUser?.id || 1}`, {
           method: 'DELETE'
         })
-        
+
         const data = await response.json()
-        
+
         if (data.success) {
           ElMessage.success(data.message)
           this.selectedRows = []
@@ -501,7 +591,7 @@ export default {
         } else {
           ElMessage.error(data.message)
         }
-        
+
       } catch (error) {
         if (error !== 'cancel') {
           ElMessage.error('清空历史记录失败: ' + error.message)
@@ -536,6 +626,89 @@ export default {
   padding: 20px;
   background: #f8f9fa;
   border-radius: 8px;
+}
+
+.history-analysis-panel {
+  margin-bottom: 30px;
+  padding: 18px;
+  background: #f8fbff;
+  border: 1px solid #d9ecff;
+  border-radius: 8px;
+}
+
+.analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.analysis-header h4 {
+  margin: 0;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.analysis-stats {
+  margin-bottom: 14px;
+}
+
+.analysis-stat {
+  min-height: 72px;
+  padding: 10px 6px;
+  background: white;
+  border-radius: 6px;
+  text-align: center;
+  border: 1px solid #edf2f7;
+}
+
+.stat-value {
+  display: block;
+  color: #409eff;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 26px;
+}
+
+.stat-label {
+  display: block;
+  margin-top: 4px;
+  color: #606266;
+  font-size: 12px;
+}
+
+.analysis-conclusion {
+  padding: 10px 12px;
+  color: #303133;
+  background: white;
+  border-left: 4px solid #409eff;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+
+.analysis-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.detail-group {
+  min-width: 220px;
+}
+
+.detail-title {
+  display: block;
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .time-info {
@@ -658,4 +831,4 @@ export default {
 .header-actions .el-button--warning {
   background: linear-gradient(45deg, #feca57, #ff9ff3);
 }
-</style> 
+</style>
