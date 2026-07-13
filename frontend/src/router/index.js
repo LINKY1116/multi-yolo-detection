@@ -4,6 +4,7 @@ import Dashboard from '../views/Dashboard.vue'
 import Detection from '../views/Detection.vue'
 import History from '../views/History.vue'
 import ModelManager from '../views/ModelManager.vue'
+import Home from '../views/Home.vue'
 
 const routes = [
   {
@@ -22,7 +23,12 @@ const routes = [
     children: [
       {
         path: '',
-        redirect: '/dashboard/detection'
+        redirect: '/dashboard/home'
+      },
+      {
+        path: 'home',
+        name: 'Home',
+        component: Home
       },
       {
         path: 'detection',

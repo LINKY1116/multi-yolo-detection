@@ -1,0 +1,272 @@
+:root {
+    --app-primary: #7c83f5;
+    --app-primary-dark: #5b63d8;
+    --app-accent: #7dd3fc;
+    --app-success: #34d399;
+    --app-warning: #fbbf24;
+    --app-danger: #fb7185;
+    --app-text: #27304f;
+    --app-muted: #71809d;
+    --app-border: rgba(214, 226, 242, .82);
+    --app-card: rgba(255, 255, 255, .88);
+    --app-bg: #f7f8ff;
+    --app-shadow: 0 22px 55px rgba(99, 102, 241, .10);
+    --app-shadow-soft: 0 12px 30px rgba(71, 85, 105, .07);
+    --el-color-primary: #7c83f5;
+    --el-color-primary-light-3: #a5b4fc;
+    --el-color-primary-light-5: #c4b5fd;
+    --el-color-primary-light-7: #ddd6fe;
+    --el-color-primary-light-9: #f3f0ff;
+    --el-border-radius-base: 14px;
+    --el-border-radius-small: 11px;
+  }
+  
+  html {
+    background: var(--app-bg);
+  }
+  
+  body {
+    color: var(--app-text);
+    background:
+      radial-gradient(circle at top left, rgba(196, 181, 253, .30), transparent 32vw),
+      radial-gradient(circle at bottom right, rgba(186, 230, 253, .34), transparent 35vw),
+      linear-gradient(180deg, #fbfbff 0%, #f4f7ff 52%, #fff8f1 100%);
+  }
+  
+  body, button, input, textarea, select {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  }
+  
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .30); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(129, 140, 248, .42); }
+  
+  .el-card {
+    border: 1px solid var(--app-border) !important;
+    border-radius: 24px !important;
+    background: var(--app-card) !important;
+    box-shadow: var(--app-shadow-soft) !important;
+    backdrop-filter: blur(18px);
+    overflow: hidden;
+  }
+  
+  .el-card__header {
+    border-bottom: 1px solid rgba(226, 232, 240, .82) !important;
+    background: linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,250,252,.58));
+    padding: 18px 22px !important;
+  }
+  
+  .el-card__body {
+    padding: 22px !important;
+  }
+  
+  .el-button {
+    border-radius: 13px !important;
+    font-weight: 800 !important;
+    transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease !important;
+  }
+  
+  .el-button:hover {
+    transform: translateY(-1px);
+  }
+  
+  .el-button--primary {
+    border: none !important;
+    background: linear-gradient(135deg, #8b5cf6, #60a5fa) !important;
+    box-shadow: 0 12px 24px rgba(129, 140, 248, .23) !important;
+  }
+  
+  .el-button--danger {
+    border: none !important;
+    background: linear-gradient(135deg, #fb7185, #fda4af) !important;
+  }
+  
+  .el-button--warning {
+    border: none !important;
+    color: #fff !important;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24) !important;
+  }
+  
+  .el-input__wrapper, .el-select__wrapper, .el-textarea__inner {
+    border-radius: 15px !important;
+    background: rgba(255, 255, 255, .92) !important;
+    box-shadow: 0 0 0 1px rgba(214, 226, 242, .92) inset !important;
+    transition: box-shadow .2s ease, transform .2s ease !important;
+  }
+  
+  .el-input__wrapper:hover, .el-select__wrapper:hover, .el-textarea__inner:hover {
+    box-shadow: 0 0 0 1px rgba(129, 140, 248, .45) inset !important;
+  }
+  
+  .el-input__wrapper.is-focus, .el-select__wrapper.is-focused, .el-textarea__inner:focus {
+    box-shadow: 0 0 0 1px var(--app-primary) inset, 0 0 0 4px rgba(129, 140, 248, .13) !important;
+  }
+  
+  .el-table {
+    border-radius: 18px;
+    overflow: hidden;
+    color: #42506f !important;
+    background: transparent !important;
+  }
+  
+  .el-table th.el-table__cell {
+    background: #f8f7ff !important;
+    color: #27304f !important;
+    font-weight: 900 !important;
+  }
+  
+  .el-table__row {
+    transition: background .2s ease;
+  }
+  
+  .el-table__row:hover > td.el-table__cell {
+    background: #fbfbff !important;
+  }
+  
+  .el-tag {
+    border-radius: 999px !important;
+    font-weight: 800;
+  }
+  
+  .el-radio-button__inner {
+    font-weight: 800 !important;
+  }
+  
+  .el-upload-dragger {
+    border-radius: 22px !important;
+    border-color: rgba(196, 181, 253, .78) !important;
+    background: linear-gradient(135deg, rgba(250, 245, 255, .72), rgba(239, 246, 255, .76)) !important;
+  }
+  
+  .el-dialog {
+    border-radius: 24px !important;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(71, 85, 105, .22) !important;
+  }
+  
+  .el-dialog__header {
+    margin: 0 !important;
+    padding: 20px 24px !important;
+    background: linear-gradient(135deg, #fbfbff, #f3f0ff);
+    border-bottom: 1px solid rgba(226, 232, 240, .9);
+  }
+  
+  .el-dialog__title {
+    font-weight: 900 !important;
+    color: #27304f !important;
+  }
+  
+  .el-dialog__body {
+    padding: 24px !important;
+  }
+  
+  .el-dialog__footer {
+    padding: 16px 24px 24px !important;
+  }
+  
+  @media (max-width: 992px) {
+    .el-card__body { padding: 18px !important; }
+  }
+  
+  /* 交互增强：让页面更像正式网站 */
+  .el-card,
+  .el-table,
+  .el-dialog {
+    transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease !important;
+  }
+  
+  .el-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(165, 180, 252, .72) !important;
+    box-shadow: 0 22px 48px rgba(99, 102, 241, .12) !important;
+  }
+  
+  .el-upload-dragger {
+    position: relative;
+    overflow: hidden;
+    transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease !important;
+  }
+  
+  .el-upload-dragger::before {
+    content: '';
+    position: absolute;
+    inset: -40%;
+    background: linear-gradient(120deg, transparent 35%, rgba(255, 255, 255, .48), transparent 65%);
+    transform: translateX(-65%) rotate(8deg);
+    transition: transform .65s ease;
+  }
+  
+  .el-upload-dragger:hover::before {
+    transform: translateX(65%) rotate(8deg);
+  }
+  
+  .el-upload-dragger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 36px rgba(124, 131, 245, .12);
+  }
+  
+  .el-table__row {
+    transition: background .2s ease, transform .2s ease;
+  }
+  
+  .el-table__row:hover {
+    background: rgba(238, 242, 255, .62) !important;
+  }
+  
+  .el-tag {
+    border-radius: 999px !important;
+    font-weight: 800 !important;
+  }
+  
+  .el-dialog {
+    background: rgba(255, 255, 255, .94) !important;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 32px 85px rgba(71, 85, 105, .18) !important;
+  }
+  
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: .01ms !important;
+    }
+  }
+  
+  /* 进一步增强交互反馈：柔和悬浮、聚焦、页面动效 */
+  .el-card,
+  .el-upload-dragger,
+  .el-dialog,
+  .el-table {
+    animation: softAppear .35s ease both;
+  }
+  
+  .el-card {
+    transition: transform .24s ease, box-shadow .24s ease, border-color .24s ease !important;
+  }
+  
+  .el-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(165, 180, 252, .72) !important;
+    box-shadow: 0 20px 46px rgba(129, 140, 248, .13) !important;
+  }
+  
+  .el-button:active {
+    transform: translateY(0) scale(.98);
+  }
+  
+  .el-upload-dragger:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 42px rgba(129, 140, 248, .14);
+  }
+  
+  .el-message {
+    border-radius: 16px !important;
+    box-shadow: 0 16px 36px rgba(71, 85, 105, .14) !important;
+  }
+  
+  @keyframes softAppear {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  

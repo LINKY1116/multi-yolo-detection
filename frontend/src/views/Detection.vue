@@ -24,6 +24,48 @@
       </el-radio-group>
     </el-card>
 
+    <!-- 检测场景选择：用于控制 AI 回答角色 -->
+    <el-card class="scenario-selector" shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <span>检测场景选择</span>
+          <el-tag type="primary" effect="plain">{{ getScenarioLabel(selectedScenario) }}</el-tag>
+        </div>
+      </template>
+      <el-radio-group v-model="selectedScenario" size="large" @change="handleScenarioChange">
+        <el-radio-button
+          v-for="item in scenarioOptions"
+          :key="item.value"
+          :label="item.value"
+        >
+          {{ item.label }}
+        </el-radio-button>
+      </el-radio-group>
+      <div class="scenario-model-row">
+        <span>当前场景模型</span>
+        <el-select
+          v-model="selectedScenarioModel"
+          class="scenario-model-select"
+          placeholder="请选择模型"
+          :loading="scenarioModelLoading"
+          @change="handleScenarioModelChange"
+        >
+          <el-option
+            v-for="modelItem in scenarioModels"
+            :key="modelItem.path"
+            :label="modelItem.name"
+            :value="modelItem.path"
+          >
+            <span>{{ modelItem.name }}</span>
+            <span class="scenario-model-path">{{ modelItem.relative_path || modelItem.path }}</span>
+          </el-option>
+        </el-select>
+      </div>
+      <div class="scenario-tip">
+        点击场景后系统会自动加载对应命名规则的模型；通用检测使用 models/yolov8n.pt。
+      </div>
+    </el-card>
+
     <el-row :gutter="20">
       <!-- 左侧：上传和控制区域 -->
       <el-col :span="12">
@@ -555,6 +597,17 @@ export default {
   data() {
     return {
       detectionMode: 'image',
+      selectedScenario: 'general',
+      scenarioOptions: [
+        { value: 'general', label: '通用检测' },
+        { value: 'drone', label: '无人机检测' },
+        { value: 'fire', label: '火灾检测' },
+        { value: 'flower', label: '花卉检测' },
+        { value: 'pest', label: '病虫害检测' }
+      ],
+      scenarioModels: [],
+      selectedScenarioModel: '',
+      scenarioModelLoading: false,
       imageUrl: '',
       videoUrl: '',
       isCameraActive: false,
@@ -594,6 +647,7 @@ export default {
   },
   mounted() {
     this.hasDeepseekApiKey = !!sessionStorage.getItem('deepseek_api_key')
+    this.handleScenarioChange()
   },
   methods: {
     getModeTitle() {
@@ -611,6 +665,70 @@ export default {
       this.resetUpload()
       this.detectionResult = {}
       this.resetAiAssistant()
+    },
+
+    async handleScenarioChange() {
+      this.resetAiAssistant()
+      await this.loadScenarioModels()
+    },
+
+    async loadScenarioModels() {
+      this.scenarioModelLoading = true
+      try {
+        const listResponse = await fetch(`/api/models/scenario/${this.selectedScenario}`)
+        const listData = await listResponse.json()
+        if (!listData.success) {
+          this.scenarioModels = []
+          this.selectedScenarioModel = ''
+          ElMessage.warning(listData.message || '未找到对应场景模型')
+          return
+        }
+        this.scenarioModels = listData.models || []
+        this.selectedScenarioModel = this.scenarioModels[0]?.path || ''
+        if (!this.selectedScenarioModel) {
+          ElMessage.warning('未找到对应场景模型，请先上传模型')
+          return
+        }
+        await this.loadSelectedScenarioModel()
+      } catch (error) {
+        ElMessage.error('场景模型列表加载失败: ' + error.message)
+      } finally {
+        this.scenarioModelLoading = false
+      }
+    },
+
+    async handleScenarioModelChange() {
+      this.resetAiAssistant()
+      await this.loadSelectedScenarioModel()
+    },
+
+    async loadSelectedScenarioModel() {
+      if (!this.selectedScenarioModel) return
+      try {
+        const response = await fetch('/api/models/load_by_scenario', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            scenario: this.selectedScenario,
+            model_path: this.selectedScenarioModel
+          })
+        })
+        const data = await response.json()
+        if (data.success) {
+          ElMessage.success(data.message || `已切换为：${this.getScenarioLabel(this.selectedScenario)}`)
+        } else {
+          ElMessage.warning(data.message || '未找到对应场景模型，请先上传模型')
+        }
+      } catch (error) {
+        ElMessage.error('场景模型切换失败: ' + error.message)
+      }
+    },
+
+    getScenarioLabel(value) {
+      const item = this.scenarioOptions.find(option => option.value === value)
+      return item ? item.label : '通用检测'
     },
 
     // 图片上传相关
@@ -926,6 +1044,7 @@ export default {
             analysis: this.detectionResult.analysis,
             detections: this.detectionResult.detections || [],
             detection_type: this.detectionMode,
+            scenario: this.selectedScenario,
             api_key: this.getDeepseekApiKey()
           })
         })
@@ -983,6 +1102,7 @@ export default {
             messages: this.chatMessages.slice(0, -1).filter(item => item.role === 'user' || item.role === 'assistant'),
             analysis: this.detectionResult.analysis,
             detections: this.detectionResult.detections || [],
+            scenario: this.selectedScenario,
             api_key: this.getDeepseekApiKey()
           })
         })
@@ -1156,6 +1276,38 @@ export default {
 
 .mode-selector {
   margin-bottom: 20px;
+}
+
+.scenario-selector {
+  margin-bottom: 20px;
+}
+
+.scenario-tip {
+  margin-top: 12px;
+  color: #71809d;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.scenario-model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  color: #52607d;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.scenario-model-select {
+  width: min(520px, 100%);
+}
+
+.scenario-model-path {
+  float: right;
+  margin-left: 16px;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .card-header {
@@ -1370,7 +1522,7 @@ export default {
 
 .analysis-header h4 {
   margin: 0;
-  color: #2c3e50;
+  color: #27304f;
 }
 
 .analysis-stats {
@@ -1427,7 +1579,7 @@ export default {
 
 .ai-report-title {
   margin-bottom: 8px;
-  color: #2c3e50;
+  color: #27304f;
   font-weight: 600;
 }
 
@@ -1648,4 +1800,217 @@ export default {
 :deep(.el-radio-button__inner) {
   padding: 12px 20px;
 }
+
+/* ===== 页面美化增强：网站化卡片、上传区、结果区 ===== */
+.detection-container {
+  max-width: 1440px;
+}
+
+.mode-selector {
+  margin-bottom: 24px;
+}
+
+.mode-selector :deep(.el-card__body) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-header {
+  color: #27304f;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.card-header span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.card-header span:first-child::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #7c83f5, #7dd3fc);
+  box-shadow: 0 0 0 5px rgba(124, 131, 245, .12);
+}
+
+:deep(.el-radio-group) {
+  padding: 6px;
+  border: 1px solid rgba(203, 213, 225, .62);
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+:deep(.el-radio-button__inner) {
+  min-width: 126px;
+  border: none !important;
+  border-radius: 14px !important;
+  background: transparent !important;
+  color: #475569;
+  font-weight: 800;
+  box-shadow: none !important;
+}
+
+:deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  color: #fff;
+  background: linear-gradient(135deg, #7c83f5, #7dd3fc) !important;
+  box-shadow: 0 12px 24px rgba(124, 131, 245, .24) !important;
+}
+
+.upload-card, .result-card {
+  min-height: 650px;
+}
+
+:deep(.el-upload-dragger) {
+  height: 338px;
+  border: 1.5px dashed rgba(124, 131, 245, .35);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,250,252,.9)),
+    radial-gradient(circle at center, rgba(124, 131, 245, .10), transparent 55%);
+  transition: all .25s ease;
+}
+
+:deep(.el-upload-dragger:hover) {
+  border-color: #7c83f5;
+  transform: translateY(-2px);
+  box-shadow: 0 18px 40px rgba(124, 131, 245, .12);
+}
+
+.upload-icon,
+.camera-icon {
+  color: #7c83f5;
+  font-size: 56px;
+  margin-bottom: 18px;
+  filter: drop-shadow(0 10px 16px rgba(124, 131, 245, .18));
+}
+
+.upload-text p:first-child {
+  color: #27304f;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.upload-text em {
+  color: #7c83f5;
+  font-style: normal;
+}
+
+.upload-tip {
+  margin-top: 8px !important;
+  color: #64748b;
+}
+
+.uploaded-image,
+.uploaded-video,
+.result-image,
+.result-video {
+  border: 1px solid rgba(203, 213, 225, .72);
+  border-radius: 20px;
+  background: #020617;
+  box-shadow: 0 18px 42px rgba(71, 85, 105, .14);
+}
+
+.camera-container {
+  height: 338px;
+  border: 1.5px dashed rgba(124, 131, 245, .35);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,250,252,.9)),
+    radial-gradient(circle at center, rgba(125, 211, 252, .10), transparent 56%);
+}
+
+.camera-overlay-container {
+  border-style: solid;
+  border-color: rgba(124, 131, 245, .6);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.45), 0 18px 40px rgba(124, 131, 245, .12);
+}
+
+.camera-video {
+  border-radius: 20px;
+}
+
+.detection-box {
+  border: 2px solid #22c55e;
+  background: rgba(34, 197, 94, .12);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .85), 0 0 22px rgba(34, 197, 94, .38);
+}
+
+.detection-label {
+  top: -30px;
+  border-radius: 999px;
+  background: #22c55e;
+  color: #052e16;
+  font-weight: 900;
+  box-shadow: 0 10px 20px rgba(34, 197, 94, .25);
+}
+
+.detection-controls {
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.result-content {
+  min-height: 454px;
+}
+
+.result-media {
+  padding: 10px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #f8fafc, #fff);
+  border: 1px solid rgba(226, 232, 240, .85);
+}
+
+.image-overlay,
+.video-overlay {
+  border-radius: 20px;
+  background: rgba(71, 85, 105, .56);
+  backdrop-filter: blur(4px);
+}
+
+.analysis-panel,
+.ai-report-section,
+.detection-list,
+.no-result {
+  border-radius: 20px !important;
+}
+
+.analysis-panel {
+  padding: 18px;
+  border: 1px solid rgba(124, 131, 245, .18);
+  background: linear-gradient(180deg, rgba(239, 246, 255, .9), rgba(255, 255, 255, .95));
+  box-shadow: 0 14px 34px rgba(124, 131, 245, .08);
+}
+
+.analysis-stat {
+  border: 1px solid rgba(226, 232, 240, .9);
+  border-radius: 16px;
+  box-shadow: 0 8px 18px rgba(71, 85, 105, .04);
+}
+
+.stat-value {
+  color: #7c83f5;
+  font-size: 22px;
+}
+
+.analysis-conclusion {
+  border-left: none;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: inset 4px 0 0 #7c83f5, 0 8px 20px rgba(71, 85, 105, .04);
+}
+
+@media (max-width: 1180px) {
+  :deep(.el-col-12) {
+    max-width: 100%;
+    flex: 0 0 100%;
+  }
+  .result-card {
+    margin-top: 22px;
+  }
+}
+
 </style>

@@ -29,6 +29,27 @@
       </div>
     </el-card>
 
+    <!-- 自动切换命名规则 -->
+    <el-card class="rules-card" shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <span>场景模型命名规则</span>
+          <el-tag type="primary" effect="plain">用于检测页自动切换模型</el-tag>
+        </div>
+      </template>
+
+      <el-table :data="namingRules" style="width: 100%">
+        <el-table-column prop="scene" label="检测场景" width="130" />
+        <el-table-column prop="recommended" label="推荐文件名" min-width="170" />
+        <el-table-column prop="keywords" label="可识别关键词" min-width="240" />
+        <el-table-column prop="note" label="说明" min-width="220" />
+      </el-table>
+
+      <div class="rule-note">
+        上传后无需手动绑定场景。检测页点击对应场景时，系统会按文件名关键词自动查找并加载模型。
+      </div>
+    </el-card>
+
     <!-- 模型列表 -->
     <el-card class="models-card" shadow="hover">
       <template #header>
@@ -174,7 +195,7 @@ import {
   Refresh, 
   Upload, 
   Star, 
-  Play, 
+  VideoPlay, 
   Delete, 
   UploadFilled 
 } from '@element-plus/icons-vue'
@@ -185,7 +206,7 @@ export default {
     Refresh,
     Upload,
     Star,
-    Play,
+    Play: VideoPlay,
     Delete,
     UploadFilled
   },
@@ -203,7 +224,39 @@ export default {
       showModelDetail: false,
       selectedModel: null,
       fileList: [],
-      uploadUrl: '/api/models/upload'
+      uploadUrl: '/api/models/upload',
+      namingRules: [
+        {
+          scene: '通用检测',
+          recommended: '默认使用 models/yolov8n.pt',
+          keywords: 'general / common / 通用',
+          note: '通用检测按钮会优先加载默认 models/yolov8n.pt'
+        },
+        {
+          scene: '无人机检测',
+          recommended: 'drone_yolov8.pt',
+          keywords: 'drone / uav / 无人机 / 飞行器',
+          note: '检测无人机图片或视频时使用'
+        },
+        {
+          scene: '火灾检测',
+          recommended: 'fire_yolov8.pt',
+          keywords: 'fire / flame / smoke / 火灾 / 火焰 / 烟雾',
+          note: '检测火焰、烟雾等安全风险目标时使用'
+        },
+        {
+          scene: '花卉检测',
+          recommended: 'flower_yolov8.pt',
+          keywords: 'flower / rose / sunflower / tulip / daisy / 花卉',
+          note: '检测花卉类别时使用'
+        },
+        {
+          scene: '病虫害检测',
+          recommended: 'pest_yolov8.pt',
+          keywords: 'pest / disease / leaf / plant / 病虫害 / 病害 / 虫害',
+          note: '检测作物病斑、虫害和叶片状态时使用'
+        }
+      ]
     }
   },
   mounted() {
@@ -433,4 +486,112 @@ export default {
 :deep(.el-table .el-button-group .el-button) {
   margin-left: 0;
 }
+
+/* ===== 页面美化增强：模型管理页 ===== */
+.model-manager {
+  max-width: 1280px;
+}
+
+.header-card,
+.rules-card,
+.models-card {
+  margin-bottom: 24px;
+}
+
+.card-header {
+  color: #27304f;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.header-actions {
+  gap: 12px;
+}
+
+.current-model-info {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid rgba(37,99,235,.16);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(239,246,255,.86), rgba(255,255,255,.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+}
+
+.current-model-info :deep(.el-alert) {
+  border: 1px solid rgba(37,99,235,.16);
+  border-radius: 18px;
+  background: #fff;
+}
+
+.rules-card :deep(.el-table th.el-table__cell) {
+  background: #f4f7ff !important;
+}
+
+.rule-note {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  color: #52607d;
+  background: linear-gradient(135deg, rgba(239,246,255,.9), rgba(245,243,255,.9));
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.model-name {
+  gap: 10px;
+  color: #27304f;
+  font-weight: 800;
+}
+
+.model-path {
+  display: inline-flex;
+  max-width: 360px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.model-detail {
+  padding: 6px 0;
+}
+
+.model-classes {
+  padding: 14px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid rgba(226,232,240,.88);
+}
+
+.class-tag {
+  margin: 3px;
+}
+
+.upload-demo :deep(.el-upload-dragger) {
+  border: 1.5px dashed rgba(37,99,235,.35);
+  border-radius: 22px;
+  background: linear-gradient(180deg, #fff, #f8fafc);
+  transition: all .25s ease;
+}
+
+.upload-demo :deep(.el-upload-dragger:hover) {
+  border-color: #7c83f5;
+  transform: translateY(-2px);
+  box-shadow: 0 18px 40px rgba(37,99,235,.12);
+}
+
+:deep(.el-table .el-button-group) {
+  gap: 6px;
+}
+
+:deep(.el-table .el-button-group .el-button) {
+  margin-left: 0;
+}
+
 </style> 

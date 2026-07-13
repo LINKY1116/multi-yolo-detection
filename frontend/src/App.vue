@@ -1,12 +1,18 @@
 <template>
   <div id="app">
     <router-view />
+    <SoftCursor />
   </div>
 </template>
 
 <script>
+import SoftCursor from './components/SoftCursor.vue'
+
 export default {
-  name: 'App'
+  name: 'App',
+  components: {
+    SoftCursor
+  }
 }
 </script>
 
@@ -17,13 +23,21 @@ export default {
   box-sizing: border-box;
 }
 
-body {
-  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+html, body, #app {
   min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
 }
 
 #app {
   min-height: 100vh;
 }
-</style> 
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+</style>

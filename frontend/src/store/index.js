@@ -71,6 +71,34 @@ export default createStore({
         commit('SET_LOADING', false)
       }
     },
+    async resetPassword({ commit }, payload) {
+      try {
+        commit('SET_LOADING', true)
+        const response = await axios.post(`${API_BASE_URL}/forgot_password`, payload)
+        return {
+          success: response.data.success,
+          message: response.data.message || '密码重置成功，请使用新密码登录'
+        }
+      } catch (firstError) {
+        try {
+          const response = await axios.post(`${API_BASE_URL}/reset_password`, payload)
+          return {
+            success: response.data.success,
+            message: response.data.message || '密码重置成功，请使用新密码登录'
+          }
+        } catch (secondError) {
+          const status = firstError.response?.status || secondError.response?.status
+          return {
+            success: false,
+            message: status === 404
+              ? '后端暂未提供密码重置接口，请检查 /api/reset_password 是否已启动。'
+              : (secondError.response?.data?.message || firstError.response?.data?.message || '密码重置失败，请稍后重试')
+          }
+        }
+      } finally {
+        commit('SET_LOADING', false)
+      }
+    },
     logout({ commit }) {
       commit('SET_USER', null)
     },

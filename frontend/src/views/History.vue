@@ -645,7 +645,7 @@ export default {
 
 .analysis-header h4 {
   margin: 0;
-  color: #2c3e50;
+  color: #27304f;
   font-weight: 600;
 }
 
@@ -831,4 +831,130 @@ export default {
 .header-actions .el-button--warning {
   background: linear-gradient(45deg, #feca57, #ff9ff3);
 }
+
+/* ===== 页面美化增强：历史页统计和表格 ===== */
+.history-container {
+  max-width: 1440px;
+}
+
+.card-header {
+  color: #27304f;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.header-actions {
+  gap: 12px;
+}
+
+.stats-row {
+  margin-bottom: 26px;
+  padding: 22px;
+  border: 1px solid rgba(226, 232, 240, .9);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.84), rgba(248,250,252,.92)),
+    radial-gradient(circle at top left, rgba(37,99,235,.10), transparent 35%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+}
+
+.stats-row :deep(.el-col) {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.stats-row :deep(.el-statistic) {
+  padding: 16px 12px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(226,232,240,.86);
+  box-shadow: 0 10px 24px rgba(15,23,42,.05);
+}
+
+:deep(.el-statistic__number) {
+  color: #7c83f5;
+  font-size: 26px;
+  font-weight: 900;
+}
+
+:deep(.el-statistic__title) {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.history-analysis-panel {
+  margin-bottom: 26px;
+  padding: 20px;
+  border: 1px solid rgba(37,99,235,.16);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(239,246,255,.92), rgba(255,255,255,.96));
+  box-shadow: 0 14px 34px rgba(37,99,235,.08);
+}
+
+.analysis-stat {
+  border-radius: 16px;
+  border: 1px solid rgba(226,232,240,.9);
+  box-shadow: 0 8px 18px rgba(15,23,42,.04);
+}
+
+.stat-value {
+  color: #7c83f5;
+  font-size: 22px;
+}
+
+.analysis-conclusion {
+  border-left: none;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: inset 4px 0 0 #7c83f5, 0 8px 20px rgba(15,23,42,.04);
+}
+
+.file-name {
+  max-width: 190px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 700;
+}
+
+.time-info,
+.file-info,
+.result-info {
+  color: #475569;
+  font-weight: 600;
+}
+
+.pagination-container {
+  margin-top: 24px;
+  display: flex;
+  justify-content: center;
+}
+
+.preview-container {
+  border: 1px solid rgba(226, 232, 240, .9);
+  border-radius: 20px;
+  background: linear-gradient(180deg, #f8fafc, #fff);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.86);
+}
+
+.preview-image,
+.preview-video {
+  border-radius: 16px;
+  box-shadow: 0 16px 36px rgba(15,23,42,.12);
+}
+
+:deep(.el-descriptions__body) {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+@media (max-width: 960px) {
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
 </style>

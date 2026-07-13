@@ -3,7 +3,7 @@ import axios from 'axios'
 
 // 临时硬编码IP地址进行测试
 // 请将下面的IP地址替换为您的实际服务器IP地址
-const API_BASE_URL = 'http://192.168.1.100:5000/api'  // 请修改这个IP地址
+const API_BASE_URL = 'http://localhost:5001/api'
 
 // 调试信息
 console.log('API_BASE_URL:', API_BASE_URL)

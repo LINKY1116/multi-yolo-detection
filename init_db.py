@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-数据库初始化脚本 - SQLite版本
+数据库初始化脚本 - MySQL版本
 用于创建数据库表和初始数据
 """
 
@@ -11,7 +11,8 @@ from datetime import datetime
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from app import app, db, User, DetectionResult
+from app import app, db, User, DetectionResult, ensure_database_exists
+from sqlalchemy import text
 
 def create_database():
     """创建数据库表"""
@@ -74,14 +75,14 @@ def create_initial_data():
             return False
 
 def check_database_connection():
-    """检查数据库连接 - SQLite版本"""
+    """检查数据库连接 - MySQL版本"""
     print("🔍 检查数据库连接...")
     
     with app.app_context():
         try:
             # 尝试执行简单查询
-            db.session.execute('SELECT 1')
-            print("✅ SQLite数据库连接正常")
+            db.session.execute(text('SELECT 1'))
+            print("✅ MySQL数据库连接正常")
             return True
         except Exception as e:
             print(f"❌ 数据库连接失败: {e}")
@@ -93,9 +94,7 @@ def show_database_info():
     
     with app.app_context():
         try:
-            # 显示数据库文件位置
-            db_path = os.path.abspath('yolo_detection.db')
-            print(f"📁 数据库文件: {db_path}")
+            print(f"📁 数据库连接: {app.config['SQLALCHEMY_DATABASE_URI']}")
             
             # 显示用户统计
             user_count = User.query.count()
@@ -120,10 +119,10 @@ def show_database_info():
 def main():
     """主函数"""
     print("=" * 50)
-    print("🗄️  YOLO检测系统数据库初始化 (SQLite)")
+    print("🗄️  YOLO检测系统数据库初始化 (MySQL)")
     print("=" * 50)
     
-    # SQLite不需要复杂的连接检查，直接创建
+    ensure_database_exists()
     print("📋 选择操作:")
     print("1. 完整初始化 (创建表 + 初始数据)")
     print("2. 仅创建数据库表")
