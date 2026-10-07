@@ -9,12 +9,12 @@ import Home from '../views/Home.vue'
 const routes = [
   {
     path: '/',
-    redirect: '/login'
+    redirect: '/login',
   },
   {
     path: '/login',
     name: 'Login',
-    component: Login
+    component: Login,
   },
   {
     path: '/dashboard',
@@ -23,35 +23,36 @@ const routes = [
     children: [
       {
         path: '',
-        redirect: '/dashboard/home'
+        name: 'WorkspaceIndex',
+        redirect: '/dashboard/detection',
       },
       {
         path: 'home',
         name: 'Home',
-        component: Home
+        component: Home,
       },
       {
         path: 'detection',
         name: 'Detection',
-        component: Detection
+        component: Detection,
       },
       {
         path: 'history',
         name: 'History',
-        component: History
+        component: History,
       },
       {
         path: 'models',
         name: 'ModelManager',
-        component: ModelManager
-      }
-    ]
-  }
+        component: ModelManager,
+      },
+    ],
+  },
 ]
 
 const router = createRouter({
   history: createWebHistory(process.env.BASE_URL),
-  routes
+  routes,
 })
 
 // 路由守卫
@@ -64,4 +65,4 @@ router.beforeEach((to, from, next) => {
   }
 })
 
-export default router 
+export default router

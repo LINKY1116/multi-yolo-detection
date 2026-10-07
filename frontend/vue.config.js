@@ -5,21 +5,21 @@ module.exports = defineConfig({
   lintOnSave: false,
   devServer: {
     port: 8080,
-    open: true,
+    open: false,
     proxy: {
       '/api': {
         target: 'http://localhost:5001',
         changeOrigin: true,
-        secure: false
+        secure: false,
       },
       '/static': {
         target: 'http://localhost:5001',
         changeOrigin: true,
-        secure: false
-      }
-    }
+        secure: false,
+      },
+    },
   },
   publicPath: process.env.NODE_ENV === 'production' ? './' : '/',
   outputDir: 'dist',
-  assetsDir: 'static'
-}) 
+  assetsDir: 'static',
+})

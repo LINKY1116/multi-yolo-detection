@@ -9,11 +9,11 @@ export default createStore({
     user: null,
     isLoading: false,
     detectionResults: [],
-    history: []
+    history: [],
   },
   getters: {
-    isAuthenticated: state => !!state.user,
-    currentUser: state => state.user
+    isAuthenticated: (state) => !!state.user,
+    currentUser: (state) => state.user,
   },
   mutations: {
     SET_USER(state, user) {
@@ -32,7 +32,7 @@ export default createStore({
     },
     SET_HISTORY(state, history) {
       state.history = history
-    }
+    },
   },
   actions: {
     async login({ commit }, credentials) {
@@ -46,9 +46,9 @@ export default createStore({
           return { success: false, message: response.data.message }
         }
       } catch (error) {
-        return { 
-          success: false, 
-          message: error.response?.data?.message || '登录失败' 
+        return {
+          success: false,
+          message: error.response?.data?.message || '登录失败',
         }
       } finally {
         commit('SET_LOADING', false)
@@ -58,14 +58,14 @@ export default createStore({
       try {
         commit('SET_LOADING', true)
         const response = await axios.post(`${API_BASE_URL}/register`, credentials)
-        return { 
-          success: response.data.success, 
-          message: response.data.message 
+        return {
+          success: response.data.success,
+          message: response.data.message,
         }
       } catch (error) {
-        return { 
-          success: false, 
-          message: error.response?.data?.message || '注册失败' 
+        return {
+          success: false,
+          message: error.response?.data?.message || '注册失败',
         }
       } finally {
         commit('SET_LOADING', false)
@@ -77,22 +77,25 @@ export default createStore({
         const response = await axios.post(`${API_BASE_URL}/forgot_password`, payload)
         return {
           success: response.data.success,
-          message: response.data.message || '密码重置成功，请使用新密码登录'
+          message: response.data.message || '密码重置成功，请使用新密码登录',
         }
       } catch (firstError) {
         try {
           const response = await axios.post(`${API_BASE_URL}/reset_password`, payload)
           return {
             success: response.data.success,
-            message: response.data.message || '密码重置成功，请使用新密码登录'
+            message: response.data.message || '密码重置成功，请使用新密码登录',
           }
         } catch (secondError) {
           const status = firstError.response?.status || secondError.response?.status
           return {
             success: false,
-            message: status === 404
-              ? '后端暂未提供密码重置接口，请检查 /api/reset_password 是否已启动。'
-              : (secondError.response?.data?.message || firstError.response?.data?.message || '密码重置失败，请稍后重试')
+            message:
+              status === 404
+                ? '后端暂未提供密码重置接口，请检查 /api/reset_password 是否已启动。'
+                : secondError.response?.data?.message ||
+                  firstError.response?.data?.message ||
+                  '密码重置失败，请稍后重试',
           }
         }
       } finally {
@@ -108,17 +111,17 @@ export default createStore({
         formData.append('user_id', state.user.id)
         const response = await axios.post(`${API_BASE_URL}/detect_image`, formData, {
           headers: {
-            'Content-Type': 'multipart/form-data'
-          }
+            'Content-Type': 'multipart/form-data',
+          },
         })
         if (response.data.success) {
           commit('SET_DETECTION_RESULTS', response.data)
         }
         return response.data
       } catch (error) {
-        return { 
-          success: false, 
-          message: error.response?.data?.message || '图片检测失败' 
+        return {
+          success: false,
+          message: error.response?.data?.message || '图片检测失败',
         }
       } finally {
         commit('SET_LOADING', false)
@@ -130,17 +133,17 @@ export default createStore({
         formData.append('user_id', state.user.id)
         const response = await axios.post(`${API_BASE_URL}/detect_video`, formData, {
           headers: {
-            'Content-Type': 'multipart/form-data'
-          }
+            'Content-Type': 'multipart/form-data',
+          },
         })
         if (response.data.success) {
           commit('SET_DETECTION_RESULTS', response.data)
         }
         return response.data
       } catch (error) {
-        return { 
-          success: false, 
-          message: error.response?.data?.message || '视频检测失败' 
+        return {
+          success: false,
+          message: error.response?.data?.message || '视频检测失败',
         }
       } finally {
         commit('SET_LOADING', false)
@@ -150,13 +153,13 @@ export default createStore({
       try {
         const response = await axios.post(`${API_BASE_URL}/process_frame`, {
           image: imageData,
-          user_id: state.user.id
+          user_id: state.user.id,
         })
         return response.data
       } catch (error) {
-        return { 
-          success: false, 
-          message: error.response?.data?.message || '帧处理失败' 
+        return {
+          success: false,
+          message: error.response?.data?.message || '帧处理失败',
         }
       }
     },
@@ -168,17 +171,22 @@ export default createStore({
         }
         return response.data
       } catch (error) {
-        return { 
-          success: false, 
-          message: error.response?.data?.message || '获取历史记录失败' 
+        return {
+          success: false,
+          message: error.response?.data?.message || '获取历史记录失败',
         }
       }
     },
     initializeAuth({ commit }) {
       const user = localStorage.getItem('user')
       if (user) {
-        commit('SET_USER', JSON.parse(user))
+        try {
+          const parsed = JSON.parse(user)
+          commit('SET_USER', parsed?.id && parsed?.username ? parsed : null)
+        } catch {
+          commit('SET_USER', null)
+        }
       }
-    }
-  }
-}) 
+    },
+  },
+})

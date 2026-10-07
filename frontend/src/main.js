@@ -9,6 +9,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
 const app = createApp(App)
+store.dispatch('initializeAuth')
 
 // 注册Element Plus图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
@@ -21,4 +22,4 @@ app.use(ElementPlus, {
   locale: zhCn,
 })
 
-app.mount('#app') 
+app.mount('#app')

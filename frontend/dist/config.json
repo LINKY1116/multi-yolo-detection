@@ -1,8 +1,0 @@
-{
-  "server_ip": "localhost",
-  "server_port": 5001,
-  "api_base_url": "http://localhost:5001/api",
-  "frontend_url": "http://localhost:8080",
-  "generated_at": "CJJ",
-  "timestamp": "localhost"
-}

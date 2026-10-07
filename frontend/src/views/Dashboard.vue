@@ -1,313 +1,368 @@
 <template>
-  <div class="dashboard-shell">
-    <DynamicDecor />
-    <el-header class="top-header">
-      <div class="brand" @click="$router.push('/dashboard/home')">
-        <div class="brand-mark">YOLO</div>
-        <div class="brand-copy">
-          <h2>智能视觉检测平台</h2>
-          <p>Multi-scene AI Vision System</p>
+  <div class="workspace-shell">
+    <div v-if="mobileOpen" class="nav-backdrop" @click="mobileOpen = false"></div>
+    <aside class="sidebar" :class="{ 'mobile-open': mobileOpen }">
+      <router-link to="/dashboard/home" class="brand" @click="mobileOpen = false"
+        ><span class="brand-symbol"
+          ><el-icon><Aim /></el-icon></span
+        ><span>Multi YOLO<small>视觉检测工作台</small></span></router-link
+      >
+      <div class="nav-label">工作空间</div>
+      <nav>
+        <router-link
+          v-for="item in navigation"
+          :key="item.path"
+          :to="item.path"
+          @click="mobileOpen = false"
+          ><el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span
+          ><span v-if="item.path.endsWith('detection')" class="nav-hint">YOLO</span></router-link
+        >
+      </nav>
+      <div class="sidebar-bottom">
+        <button
+          class="assistant-entry"
+          @click="openAssistant"
+        >
+          <el-icon><ChatDotRound /></el-icon><span>小 Y 助手</span><el-icon><TopRight /></el-icon>
+        </button>
+        <div class="sidebar-model">
+          <span class="status-label" :class="{ off: !loaded }"
+            ><i class="status-dot" :class="{ off: !loaded }"></i
+            >{{ loaded ? '推理模型已就绪' : '推理模型未就绪' }}</span
+          ><span class="mono">{{ fileName(currentModel) }}</span>
         </div>
       </div>
-
-      <el-menu
-        :default-active="$route.path"
-        mode="horizontal"
-        router
-        :ellipsis="false"
-        class="top-menu"
-      >
-        <el-menu-item index="/dashboard/home">
-          <el-icon><House /></el-icon>
-          <span>首页</span>
-        </el-menu-item>
-        <el-menu-item index="/dashboard/detection">
-          <el-icon><Camera /></el-icon>
-          <span>目标检测</span>
-        </el-menu-item>
-        <el-menu-item index="/dashboard/history">
-          <el-icon><Clock /></el-icon>
-          <span>检测历史</span>
-        </el-menu-item>
-        <el-menu-item index="/dashboard/models">
-          <el-icon><Setting /></el-icon>
-          <span>模型管理</span>
-        </el-menu-item>
-      </el-menu>
-
-      <div class="header-actions">
-        <el-tag class="soft-tag" effect="plain">{{ getPageTitle() }}</el-tag>
-        <el-dropdown>
-          <span class="user-chip">
-            <el-icon><User /></el-icon>
-            {{ $store.getters.currentUser?.username || '用户' }}
-            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item @click="$router.push('/dashboard/home')">
-                <el-icon><House /></el-icon>
-                回到首页
-              </el-dropdown-item>
-              <el-dropdown-item divided @click="handleLogout">
-                <el-icon><SwitchButton /></el-icon>
-                退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </div>
-    </el-header>
-
-    <el-main class="page-main">
-      <router-view v-slot="{ Component }">
-        <transition name="page-fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
-    </el-main>
-
-    <FloatingAssistant />
+    </aside>
+    <div class="workspace-main">
+      <header class="topbar">
+        <div class="breadcrumb">
+          <button class="icon-button mobile-menu" aria-label="打开导航" @click="mobileOpen = true">
+            <el-icon><Menu /></el-icon></button
+          ><span>工作空间</span><el-icon><ArrowRight /></el-icon><strong>{{ pageTitle }}</strong>
+        </div>
+        <div class="topbar-actions">
+          <span class="status-label" :class="{ off: !online }"
+            ><i class="status-dot" :class="{ off: !online }"></i
+            >{{ online ? '服务已连接' : '服务未连接' }}</span
+          ><span class="topbar-divider"></span
+          ><el-dropdown @command="logout"
+            ><button class="user-button">
+              <span class="user-avatar">{{ username.slice(0, 1).toUpperCase() }}</span
+              ><span>{{ username }}</span
+              ><el-icon><ArrowDown /></el-icon></button
+            ><template #dropdown
+              ><el-dropdown-menu
+                ><el-dropdown-item command="logout">退出登录</el-dropdown-item></el-dropdown-menu
+              ></template
+            ></el-dropdown
+          >
+        </div>
+      </header>
+      <main class="workspace-content"><router-view /></main>
+      <footer class="workspace-footer">
+        <span>Multi YOLO / Visual Intelligence</span><span>图片 · 视频 · 实时检测</span>
+      </footer>
+    </div>
+    <FloatingAssistant v-model="assistantOpen" />
   </div>
 </template>
-
-<script>
-import { ElMessage, ElMessageBox } from 'element-plus'
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useStore } from 'vuex'
+import { api, fileName } from '../lib/workspace'
 import FloatingAssistant from '../components/FloatingAssistant.vue'
-import DynamicDecor from '../components/DynamicDecor.vue'
-import {
-  House,
-  Camera,
-  Clock,
-  SwitchButton,
-  User,
-  ArrowDown,
-  Setting
-} from '@element-plus/icons-vue'
-
-export default {
-  name: 'Dashboard',
-  components: {
-    FloatingAssistant,
-    DynamicDecor,
-    House,
-    Camera,
-    Clock,
-    SwitchButton,
-    User,
-    ArrowDown,
-    Setting
-  },
-  mounted() {
-    this.$store.dispatch('initializeAuth')
-    if (!this.$store.getters.isAuthenticated) {
-      this.$router.push('/login')
-    }
-  },
-  methods: {
-    getPageTitle() {
-      const routeMap = {
-        '/dashboard/home': '系统首页',
-        '/dashboard/detection': '目标检测',
-        '/dashboard/history': '检测历史',
-        '/dashboard/models': '模型管理'
-      }
-      return routeMap[this.$route.path] || '智能视觉检测平台'
-    },
-    async handleLogout() {
-      try {
-        await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
-          confirmButtonText: '确定',
-          cancelButtonText: '取消',
-          type: 'warning'
-        })
-        this.$store.dispatch('logout')
-        ElMessage.success('已退出登录')
-        this.$router.push('/login')
-      } catch {
-        // 用户取消操作
-      }
-    }
+const route = useRoute(),
+  router = useRouter(),
+  store = useStore()
+const mobileOpen = ref(false),
+  assistantOpen = ref(false),
+  online = ref(false),
+  loaded = ref(false),
+  currentModel = ref('')
+const navigation = [
+  { path: '/dashboard/home', icon: 'DataAnalysis', label: '工作概览' },
+  { path: '/dashboard/detection', icon: 'Aim', label: '检测工作台' },
+  { path: '/dashboard/history', icon: 'Clock', label: '检测记录' },
+  { path: '/dashboard/models', icon: 'Cpu', label: '模型资源' },
+]
+const username = computed(() => store.state.user?.username || '用户')
+const pageTitle = computed(
+  () => navigation.find((item) => item.path === route.path)?.label || '工作空间'
+)
+let timer
+async function check() {
+  try {
+    const data = await api('/models/current', { timeout: 5000 })
+    online.value = true
+    loaded.value = data.model_info.loaded
+    currentModel.value = data.model_info.path
+  } catch {
+    online.value = false
+    loaded.value = false
   }
 }
+function openAssistant() {
+  assistantOpen.value = true
+  mobileOpen.value = false
+}
+function logout() {
+  store.dispatch('logout')
+  router.push('/login')
+}
+onMounted(() => {
+  store.dispatch('initializeAuth')
+  check()
+  timer = setInterval(check, 20000)
+  window.addEventListener('model-changed', check)
+})
+onBeforeUnmount(() => {
+  clearInterval(timer)
+  window.removeEventListener('model-changed', check)
+})
 </script>
-
 <style scoped>
-.dashboard-shell {
+.workspace-shell {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 8% 8%, rgba(167, 139, 250, .16), transparent 28vw),
-    radial-gradient(circle at 88% 12%, rgba(125, 211, 252, .16), transparent 30vw),
-    linear-gradient(135deg, #fbfbff 0%, #f3f7ff 48%, #fff7f1 100%);
 }
-
-.top-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  height: 82px !important;
-  display: grid;
-  grid-template-columns: minmax(245px, 330px) 1fr auto;
-  align-items: center;
-  gap: 18px;
-  padding: 0 32px;
-  border-bottom: 1px solid rgba(214, 226, 242, .78);
-  background: rgba(255, 255, 255, .78);
-  box-shadow: 0 14px 36px rgba(99, 102, 241, .08);
-  backdrop-filter: blur(22px);
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 218px;
+  display: flex;
+  flex-direction: column;
+  background: #fbfcfb;
+  border-right: 1px solid var(--line);
+  padding: 30px 18px 18px;
+  z-index: 100;
 }
-
 .brand {
   display: flex;
+  gap: 10px;
   align-items: center;
-  gap: 13px;
-  cursor: pointer;
-  user-select: none;
+  padding: 0 5px;
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.3;
+  white-space: nowrap;
 }
-
-.brand-mark {
-  width: 54px;
-  height: 54px;
+.brand-symbol {
+  width: 35px;
+  height: 35px;
+  background: #19684b;
+  color: white;
+  border-radius: 8px;
   display: grid;
   place-items: center;
-  border-radius: 18px;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 900;
-  letter-spacing: .5px;
-  background: linear-gradient(135deg, #8b5cf6, #60a5fa 58%, #67e8f9);
-  box-shadow: 0 16px 26px rgba(96, 165, 250, .24);
+  font-size: 23px;
 }
-
-.brand-copy h2 {
-  margin: 0;
-  color: #27304f;
-  font-size: 19px;
-  font-weight: 900;
-  line-height: 1.2;
+.brand small {
+  display: block;
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  color: #8a938c;
 }
-
-.brand-copy p {
-  margin: 5px 0 0;
-  color: #8290ad;
-  font-size: 12px;
-  letter-spacing: .7px;
+.nav-label {
+  font-size: 10px;
+  color: #9aa49c;
+  padding: 0 13px;
+  margin: 45px 0 12px;
 }
-
-.top-menu {
-  justify-content: center;
-  border: 0 !important;
-  background: transparent !important;
+nav {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
-
-:deep(.el-menu--horizontal > .el-menu-item) {
-  height: 48px;
-  margin: 0 5px;
-  padding: 0 18px;
-  border-radius: 999px;
-  border-bottom: 0 !important;
-  color: #61708f !important;
-  font-weight: 800;
-  transition: all .22s ease;
-}
-
-:deep(.el-menu--horizontal > .el-menu-item:hover) {
-  color: #5b6ee1 !important;
-  background: rgba(238, 242, 255, .92) !important;
-}
-
-:deep(.el-menu--horizontal > .el-menu-item.is-active) {
-  color: #4254c5 !important;
-  background: linear-gradient(135deg, rgba(237, 233, 254, .95), rgba(219, 234, 254, .95)) !important;
-  box-shadow: 0 12px 24px rgba(96, 165, 250, .13);
-}
-
-.header-actions {
+nav a {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 12px;
+  color: #7b857e;
+  font-size: 13px;
+  border-radius: 6px;
 }
-
-.soft-tag {
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid rgba(196, 181, 253, .55) !important;
-  color: #6554c8 !important;
-  background: rgba(245, 243, 255, .82) !important;
-  font-weight: 800;
+nav a > .el-icon {
+  font-size: 18px;
 }
-
-.user-chip {
+nav a:hover {
+  background: #f1f5f1;
+}
+nav a.router-link-active {
+  background: #eaf2eb;
+  color: #19684b;
+  font-weight: 600;
+}
+.nav-hint {
+  margin-left: auto;
+  font-size: 8px;
+  font-weight: 500;
+  border: 1px solid #d2dfd5;
+  color: #779681;
+  padding: 1px 3px;
+  border-radius: 3px;
+}
+.sidebar-bottom {
+  margin-top: auto;
+}
+.assistant-entry {
   display: flex;
   align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 10px 14px;
-  border: 1px solid rgba(214, 226, 242, .92);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .88);
-  color: #42506f;
-  font-weight: 800;
-  box-shadow: 0 10px 24px rgba(71, 85, 105, .06);
-  transition: all .22s ease;
+  gap: 10px;
+  color: #55665a;
+  background: none;
+  width: 100%;
+  border: 0;
+  padding: 15px 12px;
+  font-size: 13px;
 }
-
-.user-chip:hover {
-  border-color: rgba(147, 197, 253, .75);
-  transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(96, 165, 250, .13);
+.assistant-entry .el-icon:last-child {
+  margin-left: auto;
+  color: #8d9a91;
 }
-
-.page-main {
-  position: relative;
-  z-index: 1;
-  min-height: calc(100vh - 82px);
-  padding: 30px;
-  overflow-x: hidden;
+.sidebar-model {
+  padding: 18px 10px 4px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 7px;
 }
-
-
-.page-fade-enter-active,
-.page-fade-leave-active {
-  transition: opacity .24s ease, transform .24s ease;
+.sidebar-model > .mono {
+  color: #9aa39d;
+  font-size: 10px;
 }
-
-.page-fade-enter-from,
-.page-fade-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
+.workspace-main {
+  margin-left: 218px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
-
-@media (max-width: 1180px) {
-  .top-header {
-    grid-template-columns: 1fr;
-    height: auto !important;
-    padding: 16px 18px;
+.topbar {
+  height: 70px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+  background: #ffffffd9;
+  gap: 20px;
+}
+.breadcrumb,
+.topbar-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 12px;
+}
+.breadcrumb > span {
+  color: #97a199;
+}
+.breadcrumb > .el-icon {
+  font-size: 10px;
+  color: #afb6b0;
+}
+.breadcrumb strong {
+  font-weight: 500;
+}
+.topbar-divider {
+  height: 22px;
+  border-left: 1px solid var(--line);
+}
+.user-button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: none;
+  border: 0;
+  color: #5c685f;
+  font-size: 12px;
+  max-width: 180px;
+}
+.user-button > span:nth-child(2) {
+  max-width: 95px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-avatar {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8eee8;
+  color: #51745c;
+  font-size: 12px;
+}
+.workspace-content {
+  padding: 30px 32px;
+  flex: 1;
+  min-width: 0;
+}
+.workspace-footer {
+  padding: 14px 32px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #a4ada6;
+  gap: 15px;
+}
+.mobile-menu {
+  display: none;
+}
+@media (max-width: 1000px) {
+  .sidebar {
+    width: 190px;
+    padding: 26px 12px 16px;
   }
-
-  .top-menu {
-    justify-content: flex-start;
-    overflow-x: auto;
+  .workspace-main {
+    margin-left: 190px;
   }
-
-  .header-actions {
-    justify-content: space-between;
+  .workspace-content {
+    padding: 24px;
+  }
+  .brand {
+    font-size: 19px;
   }
 }
-
-@media (max-width: 700px) {
-  .brand-copy p,
-  .soft-tag {
+@media (max-width: 760px) {
+  .sidebar {
+    transform: translateX(-100%);
+    width: 218px;
+    transition: transform 0.2s;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  .nav-backdrop {
+    position: fixed;
+    inset: 0;
+    background: #11291e55;
+    z-index: 99;
+  }
+  .workspace-main {
+    margin-left: 0;
+  }
+  .mobile-menu {
+    display: inline-flex;
+  }
+  .topbar {
+    padding: 0 16px;
+    height: 60px;
+  }
+  .breadcrumb {
+    gap: 8px;
+  }
+  .breadcrumb > span,
+  .breadcrumb > .el-icon,
+  .topbar-divider,
+  .topbar-actions > .status-label {
     display: none;
   }
-
-  .page-main {
-    padding: 18px;
+  .workspace-content {
+    padding: 22px 16px;
   }
-
-  :deep(.el-menu--horizontal > .el-menu-item) {
-    padding: 0 13px;
+  .workspace-footer {
+    padding: 16px;
   }
 }
 </style>

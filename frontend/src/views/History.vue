@@ -1,960 +1,386 @@
 <template>
-  <div class="history-container">
-    <el-card shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>检测历史记录</span>
-          <div class="header-actions">
-            <el-button
-              type="danger"
-              @click="clearAllHistory"
-              :disabled="history.length === 0"
-              v-if="history.length > 0"
-            >
-              <el-icon><Delete /></el-icon>
-              清空所有
-            </el-button>
-            <el-button
-              type="warning"
-              @click="batchDelete"
-              :disabled="selectedRows.length === 0"
-              v-if="selectedRows.length > 0"
-            >
-              <el-icon><Delete /></el-icon>
-              批量删除 ({{ selectedRows.length }})
-            </el-button>
-            <el-button type="primary" @click="refreshHistory" :loading="$store.state.isLoading">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
-          </div>
-        </div>
-      </template>
-
-      <div class="history-content">
-        <!-- 统计信息 -->
-        <div class="stats-row" v-if="history.length > 0">
-          <el-row :gutter="20">
-            <el-col :span="6">
-              <el-statistic title="总检测次数" :value="history.length" />
-            </el-col>
-            <el-col :span="6">
-              <el-statistic title="图片检测" :value="getCountByType('image')" />
-            </el-col>
-            <el-col :span="6">
-              <el-statistic title="视频检测" :value="getCountByType('video')" />
-            </el-col>
-            <el-col :span="6">
-              <el-statistic title="摄像头检测" :value="getCountByType('camera')" />
-            </el-col>
-          </el-row>
-        </div>
-
-        <!-- 历史智能分析 -->
-        <div class="history-analysis-panel" v-if="historyAnalysis">
-          <div class="analysis-header">
-            <h4>历史智能分析</h4>
-            <el-tag :type="historyAnalysis.review_required ? 'warning' : 'success'">
-              {{ historyAnalysis.review_required ? '存在需复核记录' : '整体稳定' }}
-            </el-tag>
-          </div>
-
-          <el-row :gutter="12" class="analysis-stats">
-            <el-col :span="6">
-              <div class="analysis-stat">
-                <span class="stat-value">{{ historyAnalysis.total_records }}</span>
-                <span class="stat-label">历史检测次数</span>
-              </div>
-            </el-col>
-            <el-col :span="6">
-              <div class="analysis-stat">
-                <span class="stat-value">{{ formatPercent(historyAnalysis.avg_confidence) }}</span>
-                <span class="stat-label">历史平均置信度</span>
-              </div>
-            </el-col>
-            <el-col :span="6">
-              <div class="analysis-stat">
-                <span class="stat-value">{{ historyAnalysis.low_confidence_records }}</span>
-                <span class="stat-label">低置信度记录</span>
-              </div>
-            </el-col>
-            <el-col :span="6">
-              <div class="analysis-stat">
-                <span class="stat-value">{{ historyAnalysis.total_objects }}</span>
-                <span class="stat-label">累计目标数</span>
-              </div>
-            </el-col>
-          </el-row>
-
-          <div class="analysis-conclusion">
-            {{ historyAnalysis.conclusion }}
-          </div>
-
-          <div class="analysis-details">
-            <div class="detail-group">
-              <span class="detail-title">检测类型</span>
-              <div class="detail-tags">
-                <el-tag type="primary" effect="plain">图片 × {{ historyAnalysis.type_counts?.image || 0 }}</el-tag>
-                <el-tag type="success" effect="plain">视频 × {{ historyAnalysis.type_counts?.video || 0 }}</el-tag>
-                <el-tag type="warning" effect="plain">摄像头 × {{ historyAnalysis.type_counts?.camera || 0 }}</el-tag>
-              </div>
-            </div>
-
-            <div class="detail-group" v-if="Object.keys(historyAnalysis.class_counts || {}).length > 0">
-              <span class="detail-title">常见类别</span>
-              <div class="detail-tags">
-                <el-tag
-                  v-for="(count, className) in historyAnalysis.class_counts"
-                  :key="className"
-                  type="info"
-                  effect="plain"
-                >
-                  {{ className }} × {{ count }}
-                </el-tag>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 历史记录表格 -->
-        <el-table
-          :data="paginatedHistory"
-          style="width: 100%"
-          v-loading="$store.state.isLoading"
-          empty-text="暂无检测历史"
-          @selection-change="handleSelectionChange"
+  <div class="page">
+    <div class="page-heading">
+      <div>
+        <span class="eyebrow">DETECTION ARCHIVE</span>
+        <h1>检测记录</h1>
+        <p>已保存的图片与视频检测任务</p>
+      </div>
+      <div class="actions">
+        <el-button :disabled="!filtered.length" @click="exportRecords(filtered)"
+          ><el-icon><Download /></el-icon><span>导出 CSV</span></el-button
+        ><el-button :loading="loading" @click="refresh"
+          ><el-icon><Refresh /></el-icon><span>刷新</span></el-button
         >
-          <el-table-column type="selection" width="55" />
-
-          <el-table-column label="检测时间" width="180">
-            <template #default="scope">
-              <div class="time-info">
-                <el-icon><Clock /></el-icon>
-                {{ formatTime(scope.row.created_at) }}
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="检测类型" width="120">
-            <template #default="scope">
-              <el-tag :type="getTypeTagType(scope.row.detection_type)">
-                {{ getTypeLabel(scope.row.detection_type) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="原始文件" width="200">
-            <template #default="scope">
-              <div class="file-info" v-if="scope.row.original_file">
-                <el-icon><Document /></el-icon>
-                <span class="file-name">{{ scope.row.original_file }}</span>
-              </div>
-              <span v-else class="no-file">实时检测</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="检测结果" width="150">
-            <template #default="scope">
-              <div class="result-info">
-                <el-tag type="success" v-if="scope.row.detections && scope.row.detections.length > 0">
-                  检测到 {{ scope.row.detections.length }} 个目标
-                </el-tag>
-                <el-tag type="info" v-else>
-                  未检测到目标
-                </el-tag>
-              </div>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="最高置信度" width="150">
-            <template #default="scope">
-              <el-progress
-                v-if="scope.row.confidence"
-                :percentage="Math.round(scope.row.confidence * 100)"
-                :stroke-width="8"
-                :color="getConfidenceColor(scope.row.confidence)"
-              />
-              <span v-else>--</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="操作" width="250">
-            <template #default="scope">
-              <el-button-group>
-                <el-button
-                  size="small"
-                  @click="viewDetails(scope.row)"
-                  :disabled="!scope.row.detections || scope.row.detections.length === 0"
-                >
-                  <el-icon><View /></el-icon>
-                  查看详情
-                </el-button>
-                <el-button
-                  size="small"
-                  type="primary"
-                  @click="downloadResult(scope.row)"
-                  :disabled="!scope.row.result_file"
-                >
-                  <el-icon><Download /></el-icon>
-                  下载结果
-                </el-button>
-                <el-button
-                  size="small"
-                  type="danger"
-                  @click="deleteRecord(scope.row)"
-                >
-                  <el-icon><Delete /></el-icon>
-                  删除
-                </el-button>
-              </el-button-group>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <!-- 分页 -->
-        <div class="pagination-container" v-if="history.length > pageSize">
-          <el-pagination
-            v-model:current-page="currentPage"
-            :page-size="pageSize"
-            :total="history.length"
-            layout="total, prev, pager, next, jumper"
-            @current-change="handlePageChange"
-          />
-        </div>
       </div>
-    </el-card>
-
-    <!-- 详情对话框 -->
+    </div>
+    <el-alert v-if="error" :title="error" type="error" show-icon @close="error = ''" />
+    <div class="metric-strip">
+      <div class="metric">
+        <span class="metric-label">全部记录</span
+        ><strong class="metric-value">{{ records.length }}</strong>
+      </div>
+      <div class="metric">
+        <span class="metric-label">图片检测</span
+        ><strong class="metric-value">{{
+          records.filter((r) => r.detection_type === 'image').length
+        }}</strong>
+      </div>
+      <div class="metric">
+        <span class="metric-label">视频检测</span
+        ><strong class="metric-value">{{
+          records.filter((r) => r.detection_type === 'video').length
+        }}</strong>
+      </div>
+      <div class="metric">
+        <span class="metric-label">待复核记录</span
+        ><strong class="metric-value" style="color: #ad813b">{{
+          records.filter(needsReview).length
+        }}</strong>
+      </div>
+    </div>
+    <div class="toolbar">
+      <el-input
+        v-model="search"
+        clearable
+        placeholder="搜索文件名、类别或记录 ID"
+        aria-label="搜索检测记录"
+        ><template #prefix
+          ><el-icon><Search /></el-icon></template></el-input
+      ><el-select v-model="type" aria-label="检测类型"
+        ><el-option label="全部类型" value="" /><el-option label="图片" value="image" /><el-option
+          label="视频"
+          value="video" /><el-option label="摄像头" value="camera" /></el-select
+      ><el-date-picker
+        v-model="dates"
+        type="daterange"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        range-separator="至"
+        :editable="false"
+      /><el-checkbox v-model="onlyReview">仅待复核</el-checkbox
+      ><el-button v-if="hasFilters" text @click="resetFilters">重置</el-button>
+    </div>
+    <div class="selection-bar">
+      <span>{{
+        selection.length ? `已选择 ${selection.length} 条` : `共 ${filtered.length} 条结果`
+      }}</span>
+      <div class="actions">
+        <el-button
+          size="small"
+          type="danger"
+          plain
+          :disabled="!selection.length || deleting"
+          @click="removeSelected"
+          ><el-icon><Delete /></el-icon><span>删除选中</span></el-button
+        ><el-button
+          size="small"
+          text
+          type="danger"
+          :disabled="!records.length || deleting"
+          @click="clearAll"
+          >清空全部</el-button
+        >
+      </div>
+    </div>
+    <div class="table-shell" v-loading="loading || deleting">
+      <el-table ref="table" :data="pageRows" row-key="id" @selection-change="selection = $event"
+        ><el-table-column type="selection" width="43" /><el-table-column
+          label="检测文件"
+          min-width="240"
+          ><template #default="{ row }"
+            ><div class="file-cell">
+              <span class="file-icon"
+                ><el-icon
+                  ><component
+                    :is="row.detection_type === 'video' ? 'VideoPlay' : 'Picture'" /></el-icon
+              ></span>
+              <div class="file-info">
+                <span class="file-name" :title="row.original_file">{{
+                  row.original_file || '实时检测'
+                }}</span
+                ><small>#{{ row.id }} · {{ typeLabel(row.detection_type) }}</small>
+              </div>
+            </div></template
+          ></el-table-column
+        ><el-table-column label="检测时间" min-width="170"
+          ><template #default="{ row }"
+            ><span class="time-label">{{ formatTime(row.created_at) }}</span></template
+          ></el-table-column
+        ><el-table-column label="目标次数" width="90"
+          ><template #default="{ row }">{{
+            row.detections?.length || 0
+          }}</template></el-table-column
+        ><el-table-column label="最高置信度" width="110"
+          ><template #default="{ row }">{{ percent(row.confidence) }}</template></el-table-column
+        ><el-table-column label="状态" width="100"
+          ><template #default="{ row }"
+            ><el-tag size="small" effect="plain" :type="needsReview(row) ? 'warning' : 'success'">{{
+              needsReview(row) ? '待复核' : '已完成'
+            }}</el-tag></template
+          ></el-table-column
+        ><el-table-column label="操作" width="128" fixed="right"
+          ><template #default="{ row }"
+            ><div class="row-actions">
+              <button
+                class="icon-button"
+                aria-label="查看详情"
+                title="查看详情"
+                @click="detail = row"
+              >
+                <el-icon><View /></el-icon></button
+              ><a
+                v-if="row.result_file"
+                class="icon-button"
+                :href="`/static/${row.result_file}`"
+                :download="row.result_file"
+                aria-label="下载结果"
+                title="下载结果"
+                ><el-icon><Download /></el-icon></a
+              ><button
+                class="icon-button"
+                aria-label="删除记录"
+                title="删除记录"
+                :disabled="deleting"
+                @click="removeRecord(row)"
+              >
+                <el-icon><Delete /></el-icon>
+              </button></div></template></el-table-column
+        ><template #empty
+          ><div class="empty-state">
+            <el-icon><Document /></el-icon
+            ><strong>{{ hasFilters ? '没有符合条件的记录' : '还没有检测记录' }}</strong
+            ><el-button v-if="hasFilters" size="small" @click="resetFilters">清除筛选</el-button
+            ><el-button v-else size="small" @click="router.push('/dashboard/detection')"
+              >新建检测</el-button
+            >
+          </div></template
+        ></el-table
+      >
+    </div>
+    <div class="pagination">
+      <span>每页 {{ pageSize }} 条</span
+      ><el-pagination
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :page-sizes="[10, 20, 50]"
+        :total="filtered.length"
+        layout="prev, pager, next"
+        background
+      />
+    </div>
     <el-dialog
-      v-model="showDetails"
+      :model-value="!!detail"
+      @update:model-value="!$event && (detail = null)"
       title="检测详情"
-      width="80%"
-      destroy-on-close
-    >
-      <div v-if="selectedRecord" class="detail-content">
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <div class="detail-info">
-              <h4>基本信息</h4>
-              <el-descriptions :column="1" border>
-                <el-descriptions-item label="检测时间">
-                  {{ formatTime(selectedRecord.created_at) }}
-                </el-descriptions-item>
-                <el-descriptions-item label="检测类型">
-                  <el-tag :type="getTypeTagType(selectedRecord.detection_type)">
-                    {{ getTypeLabel(selectedRecord.detection_type) }}
-                  </el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="原始文件" v-if="selectedRecord.original_file">
-                  {{ selectedRecord.original_file }}
-                </el-descriptions-item>
-                <el-descriptions-item label="检测目标数量">
-                  {{ selectedRecord.detections ? selectedRecord.detections.length : 0 }}
-                </el-descriptions-item>
-                <el-descriptions-item label="最高置信度" v-if="selectedRecord.confidence">
-                  {{ (selectedRecord.confidence * 100).toFixed(2) }}%
-                </el-descriptions-item>
-              </el-descriptions>
-            </div>
-          </el-col>
-
-          <el-col :span="12">
-            <div class="result-preview" v-if="selectedRecord.result_file">
-              <h4>结果预览</h4>
-              <div class="preview-container">
-                <img
-                  v-if="isImageFile(selectedRecord.result_file)"
-                  :src="getResultFileUrl(selectedRecord.result_file)"
-                  class="preview-image"
-                  alt="检测结果"
-                />
-                <video
-                  v-else-if="isVideoFile(selectedRecord.result_file)"
-                  :src="getResultFileUrl(selectedRecord.result_file)"
-                  class="preview-video"
-                  controls
-                >
-                  您的浏览器不支持视频播放
-                </video>
-              </div>
-            </div>
-          </el-col>
-        </el-row>
-
-        <!-- 检测详情列表 -->
-        <div class="detection-details" v-if="selectedRecord.detections && selectedRecord.detections.length > 0">
-          <h4>检测详情</h4>
-          <el-table :data="selectedRecord.detections" style="width: 100%" size="small">
-            <el-table-column type="index" label="#" width="50" />
-            <el-table-column prop="class" label="类别" width="150" />
-            <el-table-column label="置信度" width="150">
-              <template #default="scope">
-                <el-progress
-                  :percentage="Math.round(scope.row.confidence * 100)"
-                  :stroke-width="8"
-                  :color="getConfidenceColor(scope.row.confidence)"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="边界框坐标">
-              <template #default="scope">
-                <span class="bbox-info">
-                  {{ formatBbox(scope.row.bbox) }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column label="帧数" v-if="selectedRecord.detection_type === 'video'">
-              <template #default="scope">
-                {{ scope.row.frame || '--' }}
-              </template>
-            </el-table-column>
-          </el-table>
+      width="880px"
+      ><template v-if="detail"
+        ><div class="detail-meta">
+          <span>#{{ detail.id }} · {{ typeLabel(detail.detection_type) }}</span
+          ><span>{{ formatTime(detail.created_at) }}</span
+          ><el-tag effect="plain" :type="needsReview(detail) ? 'warning' : 'success'">{{
+            needsReview(detail) ? '建议人工复核' : '已完成'
+          }}</el-tag>
         </div>
-      </div>
-    </el-dialog>
+        <div v-if="detail.result_file" class="detail-media">
+          <video
+            v-if="detail.detection_type === 'video'"
+            :src="`/static/${detail.result_file}`"
+            controls
+          /><el-image
+            v-else
+            :src="`/static/${detail.result_file}`"
+            fit="contain"
+            :preview-src-list="[`/static/${detail.result_file}`]"
+            preview-teleported
+            ><template #error><p>结果文件不可用</p></template></el-image
+          >
+        </div>
+        <el-table :data="detail.detections || []" max-height="280" empty-text="未检测到目标"
+          ><el-table-column prop="class" label="类别" /><el-table-column label="置信度"
+            ><template #default="{ row }">{{ percent(row.confidence) }}</template></el-table-column
+          ><el-table-column label="坐标" min-width="165"
+            ><template #default="{ row }"
+              ><span class="mono">{{ (row.bbox || []).map(Math.round).join(', ') }}</span></template
+            ></el-table-column
+          ></el-table
+        ></template
+      ><template #footer
+        ><el-button @click="saveFile(JSON.stringify(detail, null, 2), `record-${detail.id}.json`)"
+          >导出 JSON</el-button
+        ><el-button type="primary" @click="detail = null">关闭</el-button></template
+      ></el-dialog
+    >
   </div>
 </template>
-
-<script>
+<script setup>
+import { ref, computed, watch, onMounted } from 'vue'
+import { useStore } from 'vuex'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  Refresh,
-  Clock,
-  Document,
-  View,
-  Download,
-  Delete
-} from '@element-plus/icons-vue'
-
-export default {
-  name: 'History',
-  components: {
-    Refresh,
-    Clock,
-    Document,
-    View,
-    Download,
-    Delete
-  },
-  data() {
-    return {
-      currentPage: 1,
-      pageSize: 10,
-      showDetails: false,
-      selectedRecord: null,
-      selectedRows: [],
-      historyAnalysis: null
+import { api, percent, typeLabel, formatTime, exportRecords, saveFile } from '../lib/workspace'
+const store = useStore(),
+  route = useRoute(),
+  router = useRouter()
+const records = ref([]),
+  search = ref(''),
+  type = ref(''),
+  dates = ref(null),
+  onlyReview = ref(false),
+  page = ref(1),
+  pageSize = ref(10),
+  selection = ref([]),
+  detail = ref(null),
+  loading = ref(false),
+  deleting = ref(false),
+  error = ref(''),
+  table = ref(null)
+const needsReview = (row) =>
+  !row.detections?.length || row.detections.some((d) => d.confidence < 0.6)
+const hasFilters = computed(
+  () => !!(search.value || type.value || dates.value?.length || onlyReview.value)
+)
+const filtered = computed(() =>
+  records.value.filter((r) => {
+    const text = `${r.id} ${r.original_file || ''} ${(r.detections || [])
+      .map((d) => d.class)
+      .join(' ')}`.toLowerCase()
+    if (search.value && !text.includes(search.value.toLowerCase())) return false
+    if (type.value && r.detection_type !== type.value) return false
+    if (onlyReview.value && !needsReview(r)) return false
+    if (dates.value?.length) {
+      const time = new Date(
+        /[zZ]|[+-]\d\d:\d\d$/.test(r.created_at) ? r.created_at : `${r.created_at}Z`
+      ).getTime()
+      const end = new Date(dates.value[1])
+      end.setHours(23, 59, 59, 999)
+      if (time < dates.value[0].getTime() || time > end.getTime()) return false
     }
-  },
-  computed: {
-    history() {
-      return this.$store.state.history || []
-    },
-    paginatedHistory() {
-      const start = (this.currentPage - 1) * this.pageSize
-      const end = start + this.pageSize
-      return this.history.slice(start, end)
-    }
-  },
-  async mounted() {
-    await this.refreshHistory()
-  },
-  methods: {
-    async refreshHistory() {
-      try {
-        const result = await this.$store.dispatch('fetchHistory')
-        if (!result.success) {
-          ElMessage.error(result.message)
-        }
-        await this.fetchHistoryAnalysis()
-      } catch (error) {
-        ElMessage.error('获取历史记录失败')
-      }
-    },
-
-    async fetchHistoryAnalysis() {
-      const currentUser = this.$store.getters.currentUser
-      if (!currentUser?.id) return
-
-      try {
-        const response = await fetch(`/api/analysis/history/${currentUser.id}`)
-        const data = await response.json()
-
-        if (data.success) {
-          this.historyAnalysis = data.analysis
-        } else {
-          ElMessage.error(data.message)
-        }
-      } catch (error) {
-        ElMessage.error('获取历史智能分析失败')
-      }
-    },
-
-    formatPercent(value) {
-      return `${Math.round((value || 0) * 100)}%`
-    },
-
-    getCountByType(type) {
-      return this.history.filter(item => item.detection_type === type).length
-    },
-
-    getTypeLabel(type) {
-      const labels = {
-        image: '图片检测',
-        video: '视频检测',
-        camera: '摄像头检测'
-      }
-      return labels[type] || type
-    },
-
-    getTypeTagType(type) {
-      const types = {
-        image: 'primary',
-        video: 'success',
-        camera: 'warning'
-      }
-      return types[type] || 'info'
-    },
-
-    formatTime(timeString) {
-      const date = new Date(timeString)
-      return date.toLocaleString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      })
-    },
-
-    getConfidenceColor(confidence) {
-      if (confidence >= 0.8) return '#67c23a'
-      if (confidence >= 0.6) return '#e6a23c'
-      return '#f56c6c'
-    },
-
-    formatBbox(bbox) {
-      if (!bbox || bbox.length !== 4) return '--'
-      return `(${Math.round(bbox[0])}, ${Math.round(bbox[1])}) - (${Math.round(bbox[2])}, ${Math.round(bbox[3])})`
-    },
-
-    viewDetails(record) {
-      this.selectedRecord = record
-      this.showDetails = true
-    },
-
-    downloadResult(record) {
-      if (record.result_file) {
-        const url = this.getResultFileUrl(record.result_file)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = record.result_file
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        ElMessage.success('开始下载结果文件')
-      } else {
-        ElMessage.warning('没有可下载的结果文件')
-      }
-    },
-
-    getResultFileUrl(filename) {
-      return `/static/${filename}`
-    },
-
-    isImageFile(filename) {
-      const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
-      return imageExts.some(ext => filename.toLowerCase().endsWith(ext))
-    },
-
-    isVideoFile(filename) {
-      const videoExts = ['.mp4', '.avi', '.mov', '.mkv']
-      return videoExts.some(ext => filename.toLowerCase().endsWith(ext))
-    },
-
-    handlePageChange(page) {
-      this.currentPage = page
-    },
-
-    handleSelectionChange(selection) {
-      this.selectedRows = selection.map(item => item.id)
-    },
-
-    async deleteRecord(record) {
-      try {
-        await ElMessageBox.confirm(
-          `确定要删除这条检测记录吗？\n检测时间: ${this.formatTime(record.created_at)}\n此操作不可恢复`,
-          '删除确认',
-          {
-            confirmButtonText: '确定删除',
-            cancelButtonText: '取消',
-            type: 'warning',
-            dangerouslyUseHTMLString: true
-          }
-        )
-
-        const response = await fetch(`/api/history/delete/${record.id}`, {
-          method: 'DELETE'
-        })
-
-        const data = await response.json()
-
-        if (data.success) {
-          ElMessage.success(data.message)
-          await this.refreshHistory()
-        } else {
-          ElMessage.error(data.message)
-        }
-
-      } catch (error) {
-        if (error !== 'cancel') {
-          ElMessage.error('删除记录失败: ' + error.message)
-        }
-      }
-    },
-
-    async batchDelete() {
-      if (this.selectedRows.length === 0) {
-        ElMessage.warning('请先选择要删除的记录')
-        return
-      }
-
-      try {
-        await ElMessageBox.confirm(
-          `确定要删除选中的 ${this.selectedRows.length} 条检测记录吗？\n此操作不可恢复`,
-          '批量删除确认',
-          {
-            confirmButtonText: '确定删除',
-            cancelButtonText: '取消',
-            type: 'warning'
-          }
-        )
-
-        const currentUser = this.$store.getters.currentUser
-        const response = await fetch('/api/history/batch-delete', {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            record_ids: this.selectedRows,
-            user_id: currentUser?.id || 1
-          })
-        })
-
-        const data = await response.json()
-
-        if (data.success) {
-          ElMessage.success(data.message)
-          this.selectedRows = []
-          await this.refreshHistory()
-        } else {
-          ElMessage.error(data.message)
-        }
-
-      } catch (error) {
-        if (error !== 'cancel') {
-          ElMessage.error('批量删除失败: ' + error.message)
-        }
-      }
-    },
-
-    async clearAllHistory() {
-      if (this.history.length === 0) {
-        ElMessage.info('没有需要清空的记录')
-        return
-      }
-
-      try {
-        await ElMessageBox.confirm(
-          `确定要清空所有检测历史记录吗？\n这将删除 ${this.history.length} 条记录和相关文件\n此操作不可恢复`,
-          '清空历史确认',
-          {
-            confirmButtonText: '确定清空',
-            cancelButtonText: '取消',
-            type: 'error'
-          }
-        )
-
-        const currentUser = this.$store.getters.currentUser
-        const response = await fetch(`/api/history/clear/${currentUser?.id || 1}`, {
-          method: 'DELETE'
-        })
-
-        const data = await response.json()
-
-        if (data.success) {
-          ElMessage.success(data.message)
-          this.selectedRows = []
-          await this.refreshHistory()
-        } else {
-          ElMessage.error(data.message)
-        }
-
-      } catch (error) {
-        if (error !== 'cancel') {
-          ElMessage.error('清空历史记录失败: ' + error.message)
-        }
-      }
-    }
+    return true
+  })
+)
+const pageRows = computed(() =>
+  filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value)
+)
+watch([search, type, dates, onlyReview, pageSize], () => {
+  page.value = 1
+  table.value?.clearSelection()
+})
+watch(page, () => table.value?.clearSelection())
+function resetFilters() {
+  search.value = ''
+  type.value = ''
+  dates.value = null
+  onlyReview.value = false
+}
+async function refresh() {
+  loading.value = true
+  error.value = ''
+  try {
+    const data = await api(`/history/${store.state.user.id}`)
+    records.value = data.history
+    page.value = Math.min(
+      page.value,
+      Math.max(1, Math.ceil(filtered.value.length / pageSize.value))
+    )
+    table.value?.clearSelection()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loading.value = false
   }
 }
+async function confirmDelete(message, path, data) {
+  try {
+    await ElMessageBox.confirm(message, '删除确认', {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    deleting.value = true
+    await api(path, { method: 'DELETE', data })
+    detail.value = null
+    await refresh()
+    ElMessage.success('已删除')
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') ElMessage.error(e.message)
+  } finally {
+    deleting.value = false
+  }
+}
+function removeRecord(row) {
+  confirmDelete('删除该记录及其原始文件、结果文件？此操作不可恢复。', `/history/delete/${row.id}`)
+}
+function removeSelected() {
+  confirmDelete(
+    `删除选中的 ${selection.value.length} 条记录及关联文件？`,
+    '/history/batch-delete',
+    { record_ids: selection.value.map((r) => r.id), user_id: store.state.user.id }
+  )
+}
+function clearAll() {
+  confirmDelete(
+    `清空当前账号的全部 ${records.value.length} 条记录和关联文件？此操作不可恢复。`,
+    `/history/clear/${store.state.user.id}`
+  )
+}
+onMounted(async () => {
+  await refresh()
+  if (route.query.id)
+    detail.value = records.value.find((r) => String(r.id) === String(route.query.id)) || null
+})
 </script>
-
 <style scoped>
-.history-container {
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.card-header {
+.selection-bar {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.stats-row {
-  margin-bottom: 30px;
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 8px;
-}
-
-.history-analysis-panel {
-  margin-bottom: 30px;
-  padding: 18px;
-  background: #f8fbff;
-  border: 1px solid #d9ecff;
-  border-radius: 8px;
-}
-
-.analysis-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
-}
-
-.analysis-header h4 {
-  margin: 0;
-  color: #27304f;
-  font-weight: 600;
-}
-
-.analysis-stats {
-  margin-bottom: 14px;
-}
-
-.analysis-stat {
-  min-height: 72px;
-  padding: 10px 6px;
-  background: white;
-  border-radius: 6px;
-  text-align: center;
-  border: 1px solid #edf2f7;
-}
-
-.stat-value {
-  display: block;
-  color: #409eff;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 26px;
-}
-
-.stat-label {
-  display: block;
-  margin-top: 4px;
-  color: #606266;
-  font-size: 12px;
-}
-
-.analysis-conclusion {
-  padding: 10px 12px;
-  color: #303133;
-  background: white;
-  border-left: 4px solid #409eff;
-  border-radius: 4px;
-  line-height: 1.6;
-}
-
-.analysis-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  margin-top: 14px;
-}
-
-.detail-group {
-  min-width: 220px;
-}
-
-.detail-title {
-  display: block;
-  margin-bottom: 8px;
-  color: #606266;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.detail-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.time-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.file-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.file-name {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.no-file {
-  color: #999;
-  font-style: italic;
-}
-
-.result-info {
-  display: flex;
-  align-items: center;
-}
-
-.pagination-container {
-  margin-top: 20px;
-  text-align: center;
-}
-
-.detail-content {
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-.detail-info {
-  margin-bottom: 20px;
-}
-
-.detail-info h4 {
-  margin-bottom: 15px;
-  color: #333;
-  font-weight: 600;
-}
-
-.result-preview h4 {
-  margin-bottom: 15px;
-  color: #333;
-  font-weight: 600;
-}
-
-.preview-container {
-  text-align: center;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #f9f9f9;
-}
-
-.preview-image, .preview-video {
-  max-width: 100%;
-  max-height: 300px;
-  border-radius: 8px;
-}
-
-.detection-details {
-  margin-top: 30px;
-}
-
-.detection-details h4 {
-  margin-bottom: 15px;
-  color: #333;
-  font-weight: 600;
-}
-
-.bbox-info {
-  font-family: monospace;
-  font-size: 12px;
-  color: #666;
-}
-
-:deep(.el-statistic__number) {
-  color: #409eff;
-  font-weight: 600;
-}
-
-:deep(.el-statistic__title) {
-  color: #666;
-  font-size: 14px;
-}
-
-:deep(.el-descriptions-item__label) {
-  font-weight: 600;
-  background: #fafafa;
-}
-
-:deep(.el-table .cell) {
-  padding: 0 8px;
-}
-
-.header-actions .el-button {
-  transition: all 0.3s ease;
-}
-
-.header-actions .el-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
-.header-actions .el-button--danger {
-  background: linear-gradient(45deg, #ff6b6b, #ee5a52);
-}
-
-.header-actions .el-button--warning {
-  background: linear-gradient(45deg, #feca57, #ff9ff3);
-}
-
-/* ===== 页面美化增强：历史页统计和表格 ===== */
-.history-container {
-  max-width: 1440px;
-}
-
-.card-header {
-  color: #27304f;
-  font-size: 16px;
-  font-weight: 900;
-}
-
-.header-actions {
   gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: #8b978e;
 }
-
-.stats-row {
-  margin-bottom: 26px;
-  padding: 22px;
-  border: 1px solid rgba(226, 232, 240, .9);
-  border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.84), rgba(248,250,252,.92)),
-    radial-gradient(circle at top left, rgba(37,99,235,.10), transparent 35%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
-}
-
-.stats-row :deep(.el-col) {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-
-.stats-row :deep(.el-statistic) {
-  padding: 16px 12px;
-  border-radius: 18px;
-  background: #fff;
-  border: 1px solid rgba(226,232,240,.86);
-  box-shadow: 0 10px 24px rgba(15,23,42,.05);
-}
-
-:deep(.el-statistic__number) {
-  color: #7c83f5;
-  font-size: 26px;
-  font-weight: 900;
-}
-
-:deep(.el-statistic__title) {
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.history-analysis-panel {
-  margin-bottom: 26px;
-  padding: 20px;
-  border: 1px solid rgba(37,99,235,.16);
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(239,246,255,.92), rgba(255,255,255,.96));
-  box-shadow: 0 14px 34px rgba(37,99,235,.08);
-}
-
-.analysis-stat {
-  border-radius: 16px;
-  border: 1px solid rgba(226,232,240,.9);
-  box-shadow: 0 8px 18px rgba(15,23,42,.04);
-}
-
-.stat-value {
-  color: #7c83f5;
-  font-size: 22px;
-}
-
-.analysis-conclusion {
-  border-left: none;
-  border-radius: 16px;
-  background: #fff;
-  box-shadow: inset 4px 0 0 #7c83f5, 0 8px 20px rgba(15,23,42,.04);
-}
-
-.file-name {
-  max-width: 190px;
-  padding: 5px 9px;
-  border-radius: 999px;
-  background: #f8fafc;
-  color: #334155;
-  font-weight: 700;
-}
-
-.time-info,
-.file-info,
-.result-info {
-  color: #475569;
-  font-weight: 600;
-}
-
-.pagination-container {
-  margin-top: 24px;
+.row-actions {
   display: flex;
-  justify-content: center;
+  gap: 5px;
 }
-
-.preview-container {
-  border: 1px solid rgba(226, 232, 240, .9);
-  border-radius: 20px;
-  background: linear-gradient(180deg, #f8fafc, #fff);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.86);
+.row-actions .icon-button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  font-size: 15px;
+  background: transparent;
 }
-
-.preview-image,
-.preview-video {
-  border-radius: 16px;
-  box-shadow: 0 16px 36px rgba(15,23,42,.12);
+.time-label {
+  color: #7d8a81;
+  font-size: 12px;
 }
-
-:deep(.el-descriptions__body) {
-  border-radius: 16px;
-  overflow: hidden;
+.detail-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  font-size: 12px;
+  color: var(--muted);
 }
-
-@media (max-width: 960px) {
-  .header-actions {
-    flex-wrap: wrap;
-    justify-content: flex-end;
+.detail-media {
+  background: #e9efea;
+  height: 320px;
+  margin-bottom: 18px;
+}
+.detail-media > * {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.detail-media :deep(.el-image__error) {
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .detail-media {
+    height: 220px;
   }
 }
-
 </style>

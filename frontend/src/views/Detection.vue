@@ -1,2016 +1,1319 @@
 <template>
-  <div class="detection-container">
-    <!-- 检测方式选择 -->
-    <el-card class="mode-selector" shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>检测方式选择</span>
-        </div>
-      </template>
-
-      <el-radio-group v-model="detectionMode" size="large" @change="handleModeChange">
-        <el-radio-button label="image">
-          <el-icon><Picture /></el-icon>
-          图片检测
-        </el-radio-button>
-        <el-radio-button label="video">
-          <el-icon><VideoPlay /></el-icon>
-          视频检测
-        </el-radio-button>
-        <el-radio-button label="camera">
-          <el-icon><Camera /></el-icon>
-          摄像头检测
-        </el-radio-button>
-      </el-radio-group>
-    </el-card>
-
-    <!-- 检测场景选择：用于控制 AI 回答角色 -->
-    <el-card class="scenario-selector" shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>检测场景选择</span>
-          <el-tag type="primary" effect="plain">{{ getScenarioLabel(selectedScenario) }}</el-tag>
-        </div>
-      </template>
-      <el-radio-group v-model="selectedScenario" size="large" @change="handleScenarioChange">
-        <el-radio-button
-          v-for="item in scenarioOptions"
-          :key="item.value"
-          :label="item.value"
+  <div class="page detection-page">
+    <div class="page-heading">
+      <div>
+        <span class="eyebrow">DETECTION WORKSPACE</span>
+        <h1>检测工作台</h1>
+        <p>{{ scene.label }} <span class="heading-separator">/</span> {{ sceneRole }}</p>
+      </div>
+      <div class="actions">
+        <el-button @click="keyDialog = true"
+          ><el-icon><Key /></el-icon><span>AI 配置</span></el-button
+        ><el-button :disabled="!result" @click="exportResult"
+          ><el-icon><Download /></el-icon><span>导出结果</span></el-button
         >
-          {{ item.label }}
-        </el-radio-button>
-      </el-radio-group>
-      <div class="scenario-model-row">
-        <span>当前场景模型</span>
-        <el-select
-          v-model="selectedScenarioModel"
-          class="scenario-model-select"
-          placeholder="请选择模型"
-          :loading="scenarioModelLoading"
-          @change="handleScenarioModelChange"
-        >
-          <el-option
-            v-for="modelItem in scenarioModels"
-            :key="modelItem.path"
-            :label="modelItem.name"
-            :value="modelItem.path"
+      </div>
+    </div>
+    <div class="scene-tabs" role="tablist" aria-label="检测场景">
+      <button
+        v-for="item in scenes"
+        :key="item.value"
+        role="tab"
+        :aria-selected="scenario === item.value"
+        :class="{ active: scenario === item.value }"
+        :disabled="locked"
+        @click="selectScene(item.value)"
+      >
+        <el-icon :style="{ color: item.color }"><component :is="item.icon" /></el-icon
+        ><span>{{ item.label }}</span
+        ><i v-if="scenario === item.value" class="tab-indicator"></i>
+      </button>
+    </div>
+    <el-alert v-if="error" :title="error" type="error" show-icon @close="error = ''" />
+    <div class="detection-layout">
+      <aside class="control-panel">
+        <div class="control-title">
+          <h2>检测配置</h2>
+          <span class="step-label">01</span>
+        </div>
+        <label class="field-label">输入来源</label>
+        <div class="segment input-modes">
+          <button
+            v-for="item in modes"
+            :key="item.value"
+            :class="{ active: mode === item.value }"
+            :disabled="locked"
+            @click="setMode(item.value)"
           >
-            <span>{{ modelItem.name }}</span>
-            <span class="scenario-model-path">{{ modelItem.relative_path || modelItem.path }}</span>
-          </el-option>
-        </el-select>
-      </div>
-      <div class="scenario-tip">
-        点击场景后系统会自动加载对应命名规则的模型；通用检测使用 models/yolov8n.pt。
-      </div>
-    </el-card>
-
-    <el-row :gutter="20">
-      <!-- 左侧：上传和控制区域 -->
-      <el-col :span="12">
-        <el-card class="upload-card" shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>{{ getModeTitle() }}</span>
-              <el-button
-                v-if="detectionMode === 'camera' && !isCameraActive"
-                type="primary"
-                @click="startCamera"
-                :loading="$store.state.isLoading"
-              >
-                启动摄像头
-              </el-button>
-              <el-button
-                v-if="detectionMode === 'camera' && isCameraActive"
-                type="danger"
-                @click="stopCamera"
-              >
-                停止摄像头
-              </el-button>
-            </div>
-          </template>
-
-          <!-- 图片上传 -->
-          <div v-if="detectionMode === 'image'" class="upload-section">
-            <el-upload
-              class="image-uploader"
-              :action="uploadAction"
-              :show-file-list="false"
-              :before-upload="beforeImageUpload"
-              :on-success="handleImageSuccess"
-              :on-error="handleUploadError"
-              :data="{ user_id: $store.getters.currentUser?.id }"
-              drag
+            <el-icon><component :is="item.icon" /></el-icon>{{ item.label }}
+          </button>
+        </div>
+        <label class="field-label" for="model-picker"
+          >场景模型 <span>{{ models.length }} 个可用</span></label
+        >
+        <el-select
+          id="model-picker"
+          v-model="selectedModel"
+          aria-label="场景模型"
+          placeholder="暂无匹配模型"
+          :disabled="locked"
+          :loading="modelBusy"
+          @change="loadModel"
+          ><el-option v-for="item in models" :key="item.path" :label="item.name" :value="item.path"
+        /></el-select>
+        <div class="model-state">
+          <span class="status-label" :class="{ off: !ready }"
+            ><i class="status-dot" :class="{ off: !ready }"></i
+            >{{
+              modelBusy ? '模型加载中' : ready ? `已就绪 · ${classes.length} 个类别` : '模型未就绪'
+            }}</span
+          ><button
+            v-if="!ready && !modelBusy && selectedModel"
+            class="retry-link"
+            @click="loadModel"
+          >
+            重试
+          </button>
+        </div>
+        <router-link
+          v-if="!models.length && !modelBusy"
+          class="resource-link"
+          to="/dashboard/models"
+          >前往模型资源 <el-icon><ArrowRight /></el-icon
+        ></router-link>
+        <div class="confidence-label">
+          <label class="field-label" for="confidence">置信度阈值</label
+          ><span class="mono">{{ confidence.toFixed(2) }}</span>
+        </div>
+        <el-slider
+          id="confidence"
+          v-model="confidence"
+          aria-label="置信度阈值"
+          :min="0.01"
+          :max="0.95"
+          :step="0.01"
+          :disabled="locked"
+          :format-tooltip="percent"
+          @change="clearResult"
+        />
+        <div class="slider-labels">
+          <span>0.01</span
+          ><button
+            :disabled="locked"
+            @click="resetConfidence"
+          >
+            恢复默认</button
+          ><span>0.95</span>
+        </div>
+        <p v-if="confidence < 0.15" class="threshold-note">
+          <el-icon><Warning /></el-icon>低阈值结果可能包含较多误检
+        </p>
+        <div class="upload-divider"></div>
+        <template v-if="mode !== 'camera'">
+          <label class="field-label">待检测文件</label>
+          <input
+            ref="fileInput"
+            class="hidden-file"
+            type="file"
+            :accept="mode === 'image' ? '.jpg,.jpeg,.png,.gif,.bmp' : '.mp4,.avi,.mov,.mkv'"
+            :disabled="locked"
+            @change="chooseFile($event.target.files[0])"
+          />
+          <button
+            class="upload-drop"
+            :class="{ 'is-dragging': dragging }"
+            :disabled="locked"
+            @click="fileInput.click()"
+            @dragover.prevent="dragging = true"
+            @dragleave.prevent="dragging = false"
+            @drop.prevent="dropFile"
+          >
+            <el-icon><UploadFilled /></el-icon
+            ><strong>{{ file ? '更换文件' : '选择或拖入文件' }}</strong
+            ><small>{{
+              mode === 'image'
+                ? 'JPG / PNG / GIF / BMP · ≤ 10 MB'
+                : 'MP4 / AVI / MOV / MKV · ≤ 100 MB'
+            }}</small>
+          </button>
+          <div v-if="file" class="selected-file">
+            <el-icon><Document /></el-icon
+            ><span :title="file.name"
+              >{{ file.name }}<small>{{ (file.size / 1048576).toFixed(2) }} MB</small></span
+            ><button
+              class="icon-button"
+              :disabled="locked"
+              aria-label="移除文件"
+              title="移除文件"
+              @click="resetFile"
             >
-              <div v-if="!imageUrl" class="upload-placeholder">
-                <el-icon class="upload-icon"><Plus /></el-icon>
-                <div class="upload-text">
-                  <p>拖拽图片到此处，或<em>点击上传</em></p>
-                  <p class="upload-tip">支持 JPG、PNG、GIF 格式，大小不超过 10MB</p>
-                </div>
-              </div>
-              <img v-else :src="imageUrl" class="uploaded-image" alt="上传的图片">
-            </el-upload>
+              <el-icon><Close /></el-icon>
+            </button>
           </div>
-
-          <!-- 视频上传 -->
-          <div v-if="detectionMode === 'video'" class="upload-section">
-            <el-upload
-              class="video-uploader"
-              :action="videoUploadAction"
-              :show-file-list="false"
-              :before-upload="beforeVideoUpload"
-              :on-success="handleVideoSuccess"
-              :on-error="handleUploadError"
-              :data="{ user_id: $store.getters.currentUser?.id }"
-              drag
+          <el-button
+            class="run-button"
+            type="primary"
+            :disabled="!ready || !file || modelBusy"
+            :loading="running"
+            @click="detect"
+            ><el-icon v-if="!running"><VideoPlay /></el-icon
+            ><span>{{ running ? '正在检测' : result ? '重新检测' : '开始检测' }}</span></el-button
+          >
+        </template>
+        <template v-else
+          ><div class="camera-info">
+            <el-icon><VideoCamera /></el-icon><span>本机摄像头</span>
+          </div>
+          <el-button
+            class="run-button"
+            :type="cameraActive ? 'danger' : 'primary'"
+            :disabled="!ready || modelBusy || cameraStarting"
+            :loading="cameraStarting"
+            @click="cameraActive ? stopCamera() : startCamera()"
+            ><el-icon><VideoCamera /></el-icon
+            ><span>{{ cameraActive ? '停止检测' : '启动摄像头' }}</span></el-button
+          ></template
+        >
+        <div class="config-foot">
+          <el-icon><Lock /></el-icon
+          ><span>{{
+            mode === 'camera' ? '实时画面不保存到历史记录' : '检测结果保存到当前账号'
+          }}</span>
+        </div>
+      </aside>
+      <section class="output-panel">
+        <div class="preview-toolbar">
+          <div class="preview-title">
+            <el-icon><View /></el-icon>
+            <h2>视觉预览</h2>
+            <el-tag v-if="result" size="small" type="success" effect="plain">{{
+              mode === 'camera' ? '实时' : '已完成'
+            }}</el-tag>
+          </div>
+          <div class="segment">
+            <button
+              :class="{ active: previewMode === 'original' }"
+              :disabled="mode === 'camera'"
+              @click="previewMode = 'original'"
             >
-              <div v-if="!videoUrl" class="upload-placeholder">
-                <el-icon class="upload-icon"><VideoPlay /></el-icon>
-                <div class="upload-text">
-                  <p>拖拽视频到此处，或<em>点击上传</em></p>
-                  <p class="upload-tip">支持 MP4、AVI、MOV 格式，大小不超过 100MB</p>
-                </div>
-              </div>
-              <video v-else :src="videoUrl" class="uploaded-video" controls>
-                您的浏览器不支持视频播放
-              </video>
-            </el-upload>
+              原始文件</button
+            ><button
+              :class="{ active: previewMode === 'result' }"
+              :disabled="!result || mode === 'camera'"
+              @click="previewMode = 'result'"
+            >
+              检测结果
+            </button>
           </div>
-
-          <!-- 摄像头 -->
-          <div v-if="detectionMode === 'camera'" class="camera-section">
-            <div class="camera-container" :class="{ 'camera-overlay-container': isCameraActive }">
-              <video
-                ref="cameraVideo"
-                class="camera-video"
-                autoplay
-                muted
-                v-show="isCameraActive"
-              ></video>
-              <canvas
-                ref="cameraCanvas"
-                class="camera-canvas"
-                style="display: none;"
-              ></canvas>
-
-              <!-- 实时检测框叠加层 -->
-              <div v-if="isCameraActive" class="camera-detection-overlay">
-                <div
-                  v-for="(detection, index) in realtimeDetections"
-                  :key="`detection-${index}-${detection.confidence}`"
-                  class="detection-box"
-                  :style="getDetectionBoxStyle(detection)"
-                >
-                  <span class="detection-label">
-                    {{ detection.class }}: {{ (detection.confidence * 100).toFixed(1) }}%
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="!isCameraActive" class="camera-placeholder">
-                <el-icon class="camera-icon"><Camera /></el-icon>
-                <p>点击上方"启动摄像头"开始实时检测</p>
-              </div>
-            </div>
+        </div>
+        <div
+          class="visual-stage"
+          :class="{ 'has-media': !!mediaUrl || cameraActive }"
+          v-loading="running"
+          element-loading-text="正在进行目标检测…"
+          element-loading-background="rgba(245,248,245,.9)"
+        >
+          <template v-if="mode === 'camera'"
+            ><video
+              ref="cameraVideo"
+              autoplay
+              muted
+              playsinline
+              :class="{ invisible: !cameraActive }"
+            ></video
+            ><canvas
+              ref="cameraCanvas"
+              class="camera-overlay"
+              :class="{ invisible: !cameraActive }"
+            ></canvas>
+            <div v-if="!cameraActive" class="stage-empty">
+              <el-icon><VideoCamera /></el-icon><strong>摄像头待启动</strong>
+            </div></template
+          >
+          <template v-else-if="mediaUrl"
+            ><el-image
+              v-if="mode === 'image'"
+              :src="mediaUrl"
+              fit="contain"
+              :preview-src-list="[mediaUrl]"
+              preview-teleported
+              ><template #error><div class="stage-empty">图片加载失败</div></template></el-image
+            ><video
+              v-else
+              :key="mediaUrl"
+              :src="mediaUrl"
+              controls
+              playsinline
+              @error="error = '视频无法预览，请下载结果或更换视频编码'"
+          /></template>
+          <div v-else class="stage-empty">
+            <span class="empty-crosshair"
+              ><el-icon><Aim /></el-icon></span
+            ><strong>等待检测素材</strong
+            ><span>{{ mode === 'image' ? 'IMAGE' : 'VIDEO' }} / {{ scene.short }}</span>
           </div>
-
-          <!-- 检测控制 -->
-          <div class="detection-controls" v-if="detectionMode !== 'camera'">
+        </div>
+        <div class="preview-footer">
+          <span class="mono">{{
+            file ? file.name : mode === 'camera' ? 'LIVE CAMERA' : 'NO SOURCE'
+          }}</span
+          ><span v-if="result"
+            >{{ detections.length }} 个{{ mode === 'video' ? '采样目标' : '目标'
+            }}<span v-if="elapsed"> · {{ elapsed }} s</span></span
+          ><span v-else>等待检测</span>
+        </div>
+        <div class="result-metrics">
+          <div>
+            <span>目标{{ mode === 'video' ? '次数' : '数量' }}</span
+            ><strong>{{ result ? detections.length : '--' }}</strong>
+          </div>
+          <div>
+            <span>平均置信度</span><strong>{{ result ? percent(stats.avg) : '--' }}</strong>
+          </div>
+          <div>
+            <span>最高置信度</span><strong>{{ result ? percent(stats.max) : '--' }}</strong>
+          </div>
+          <div>
+            <span>低置信度目标</span
+            ><strong :class="{ amber: stats.low }">{{ result ? stats.low : '--' }}</strong>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="result-bottom">
+      <section class="targets-section">
+        <div class="section-head">
+          <h2>
+            目标明细 <small v-if="result">{{ detections.length }}</small>
+          </h2>
+          <a
+            v-if="resultUrl"
+            :href="resultUrl"
+            :download="fileName(resultUrl)"
+            class="download-link"
+            ><el-icon><Download /></el-icon> 下载结果文件</a
+          >
+        </div>
+        <div class="table-shell">
+          <el-table
+            :data="detections.slice((targetPage - 1) * 8, targetPage * 8)"
+            empty-text="暂无检测目标"
+            ><el-table-column type="index" width="48" label="#" /><el-table-column
+              prop="class"
+              label="目标类别"
+              min-width="130"
+            /><el-table-column label="置信度" width="120"
+              ><template #default="{ row }"
+                ><span :class="{ amber: row.confidence < 0.6 }">{{
+                  percent(row.confidence)
+                }}</span></template
+              ></el-table-column
+            ><el-table-column label="位置 / XYXY" min-width="155"
+              ><template #default="{ row }"
+                ><span class="mono">{{
+                  (row.bbox || []).map((n) => Math.round(n)).join(', ')
+                }}</span></template
+              ></el-table-column
+            ></el-table
+          >
+        </div>
+        <el-pagination
+          v-if="detections.length > 8"
+          v-model:current-page="targetPage"
+          :page-size="8"
+          :total="detections.length"
+          layout="prev, pager, next"
+          size="small"
+          class="target-pagination"
+        />
+      </section>
+      <section class="insights-section">
+        <div class="section-head">
+          <h2>
+            <el-icon><ChatDotRound /></el-icon> AI 研判
+          </h2>
+          <el-tag size="small" effect="plain" type="info">{{ scene.short }}</el-tag>
+        </div>
+        <p v-if="!result" class="muted insight-empty">暂无检测上下文</p>
+        <template v-else
+          ><div class="tag-list">
+            <el-tag
+              v-for="(count, label) in stats.counts"
+              :key="label"
+              effect="plain"
+              type="info"
+              size="small"
+              >{{ label }} × {{ count }}</el-tag
+            >
+          </div>
+          <p class="analysis-summary">
+            {{
+              result.analysis?.conclusion ||
+              (stats.low
+                ? '存在低置信度目标，建议人工复核。'
+                : detections.length
+                ? '已完成当前画面检测。'
+                : '当前阈值下未检测到目标。')
+            }}
+          </p>
+          <div class="actions">
             <el-button
               type="primary"
-              size="large"
-              :disabled="!canDetect"
-              :loading="$store.state.isLoading"
-              @click="startDetection"
-            >
-              <el-icon><Search /></el-icon>
-              开始检测
-            </el-button>
-            <el-button @click="resetUpload">
-              <el-icon><RefreshRight /></el-icon>
-              重新上传
-            </el-button>
+              plain
+              :loading="reportLoading"
+              :disabled="locked"
+              @click="generateReport"
+              >生成报告</el-button
+            ><el-button :disabled="locked" @click="chatOpen = true"
+              >结果问答 <el-icon><ArrowRight /></el-icon
+            ></el-button>
           </div>
-        </el-card>
-      </el-col>
-
-      <!-- 右侧：检测结果区域 -->
-      <el-col :span="12">
-        <el-card class="result-card" shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>检测结果</span>
-              <div class="result-stats" v-if="detectionResult.detections">
-                <el-tag type="success">
-                  检测到 {{ detectionResult.detections.length }} 个目标
-                </el-tag>
-              </div>
-            </div>
-          </template>
-
-          <div class="result-content">
-            <!-- 检测结果图片 -->
-            <div v-if="detectionResult.result_image && detectionMode === 'image'" class="result-media">
-              <img
-                :src="getResultImageUrl()"
-                class="result-image"
-                alt="检测结果"
-                @error="handleImageError"
-                @click="openImagePreview(getResultImageUrl())"
-              >
-              <div class="image-overlay">
-                <el-button type="primary" @click="openImagePreview(getResultImageUrl())">
-                  <el-icon><ZoomIn /></el-icon>
-                  点击放大查看
-                </el-button>
-              </div>
-            </div>
-
-            <!-- 检测结果视频 -->
-            <div v-if="detectionResult.result_video && detectionMode === 'video'" class="result-media">
-              <video
-                :src="getResultVideoUrl()"
-                class="result-video"
-                controls
-                preload="metadata"
-                @error="handleVideoError"
-                @loadstart="onVideoLoadStart"
-                @loadeddata="onVideoLoaded"
-              >
-                您的浏览器不支持视频播放
-              </video>
-              <div class="video-overlay">
-                <el-button type="primary" @click="openVideoPreview(getResultVideoUrl())">
-                  <el-icon><ZoomIn /></el-icon>
-                  全屏查看
-                </el-button>
-              </div>
-            </div>
-
-            <!-- 智能分析结果 -->
-            <div v-if="detectionResult.analysis" class="analysis-panel">
-              <div class="analysis-header">
-                <h4>智能分析</h4>
-                <el-tag :type="detectionResult.analysis.review_required ? 'warning' : 'success'">
-                  {{ detectionResult.analysis.review_required ? '建议复核' : '结果可靠' }}
-                </el-tag>
-              </div>
-
-              <el-row :gutter="12" class="analysis-stats">
-                <el-col :span="6">
-                  <div class="analysis-stat">
-                    <span class="stat-value">{{ detectionResult.analysis.total_objects }}</span>
-                    <span class="stat-label">目标总数</span>
-                  </div>
-                </el-col>
-                <el-col :span="6">
-                  <div class="analysis-stat">
-                    <span class="stat-value">{{ formatPercent(detectionResult.analysis.avg_confidence) }}</span>
-                    <span class="stat-label">平均置信度</span>
-                  </div>
-                </el-col>
-                <el-col :span="6">
-                  <div class="analysis-stat">
-                    <span class="stat-value">{{ formatPercent(detectionResult.analysis.max_confidence) }}</span>
-                    <span class="stat-label">最高置信度</span>
-                  </div>
-                </el-col>
-                <el-col :span="6">
-                  <div class="analysis-stat">
-                    <span class="stat-value">{{ detectionResult.analysis.low_confidence_count }}</span>
-                    <span class="stat-label">低置信度</span>
-                  </div>
-                </el-col>
-              </el-row>
-
-              <div class="analysis-conclusion">
-                {{ detectionResult.analysis.conclusion }}
-              </div>
-
-              <div class="ai-actions">
-                <el-button
-                  type="primary"
-                  :loading="aiReportLoading"
-                  @click="generateAiReport"
-                >
-                  <el-icon><Document /></el-icon>
-                  生成AI报告
-                </el-button>
-                <el-button @click="openChatDialog">
-                  <el-icon><ChatDotRound /></el-icon>
-                  智能问答
-                </el-button>
-                <el-button @click="showApiKeyDialog = true">
-                  设置API Key
-                </el-button>
-                <el-button
-                  v-if="hasDeepseekApiKey"
-                  type="danger"
-                  plain
-                  @click="clearDeepseekApiKey"
-                >
-                  清除Key
-                </el-button>
-              </div>
-
-              <div v-if="aiReport" class="ai-report">
-                <div class="ai-report-title">AI自然语言报告</div>
-                <div class="ai-report-content">{{ aiReport }}</div>
-              </div>
-
-              <div v-if="detectionResult.analysis.detection_type === 'video'" class="video-analysis-details">
-                <div class="video-metric">
-                  <span class="video-metric-value">{{ detectionResult.analysis.processed_frames }}</span>
-                  <span class="video-metric-label">处理帧数</span>
-                </div>
-                <div class="video-metric">
-                  <span class="video-metric-value">{{ detectionResult.analysis.sampled_frame_count }}</span>
-                  <span class="video-metric-label">采样帧数</span>
-                </div>
-                <div class="video-metric">
-                  <span class="video-metric-value">{{ detectionResult.analysis.detected_frame_count }}</span>
-                  <span class="video-metric-label">有目标帧数</span>
-                </div>
-                <div class="video-metric">
-                  <span class="video-metric-value">{{ formatNumber(detectionResult.analysis.avg_detections_per_sampled_frame) }}</span>
-                  <span class="video-metric-label">平均目标/采样帧</span>
-                </div>
-              </div>
-
-              <div v-if="Object.keys(detectionResult.analysis.class_counts || {}).length > 0" class="class-distribution">
-                <span class="distribution-title">类别分布</span>
-                <div class="class-tags">
-                  <el-tag
-                    v-for="(count, className) in detectionResult.analysis.class_counts"
-                    :key="className"
-                    type="info"
-                    effect="plain"
-                  >
-                    {{ className }} × {{ count }}
-                  </el-tag>
-                </div>
-              </div>
-            </div>
-
-            <!-- 检测结果列表 -->
-            <div v-if="detectionResult.detections && detectionResult.detections.length > 0" class="detection-list">
-              <h4>检测详情</h4>
-              <el-table :data="detectionResult.detections" style="width: 100%" size="small" max-height="300">
-                <el-table-column prop="class" label="类别" width="120" />
-                <el-table-column label="置信度" width="100">
-                  <template #default="scope">
-                    <el-progress
-                      :percentage="Math.round(scope.row.confidence * 100)"
-                      :stroke-width="8"
-                    />
-                  </template>
-                </el-table-column>
-                <el-table-column label="位置">
-                  <template #default="scope">
-                    <span class="bbox-info">
-                      {{ formatBbox(scope.row.bbox) }}
-                    </span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="帧数" v-if="detectionMode === 'video'" width="80">
-                  <template #default="scope">
-                    {{ scope.row.frame || '--' }}
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-
-            <!-- 空状态 -->
-            <div v-if="!detectionResult.detections && !$store.state.isLoading && detectionMode !== 'camera'" class="empty-result">
-              <el-empty description="暂无检测结果">
-                <el-button type="primary" @click="startDetection" v-if="canDetect">
-                  开始检测
-                </el-button>
-              </el-empty>
-            </div>
-
-            <!-- 摄像头模式的空状态 -->
-            <div v-if="detectionMode === 'camera' && !isCameraActive && !$store.state.isLoading" class="empty-result">
-              <el-empty description="请启动摄像头开始实时检测" />
-            </div>
-
-            <!-- 实时检测统计 -->
-            <div v-if="detectionMode === 'camera' && isCameraActive" class="realtime-stats">
-              <el-statistic title="实时检测到的目标" :value="realtimeDetections.length" />
-            </div>
-
-            <!-- 加载状态 -->
-            <div v-if="$store.state.isLoading" class="loading-result">
-              <el-loading
-                element-loading-text="正在进行AI检测分析..."
-                element-loading-spinner="el-icon-loading"
-                element-loading-background="rgba(0, 0, 0, 0.8)"
-              />
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 图片预览对话框 -->
-    <el-dialog
-      v-model="showImagePreview"
-      title="检测结果 - 放大查看"
-      width="90%"
-      top="5vh"
-      destroy-on-close
-      @close="closeImagePreview"
-    >
-      <div class="preview-container">
-        <img
-          v-if="previewImageUrl"
-          :src="previewImageUrl"
-          class="preview-image"
-          alt="检测结果放大图"
-          :style="{
-            transform: `scale(${zoomLevel})`,
-            cursor: 'grab'
-          }"
-          @load="onPreviewImageLoad"
-          @error="onPreviewImageError"
-          @mousedown="startDrag"
-          @mousemove="drag"
-          @mouseup="endDrag"
-          @wheel="handleWheel"
+          <div v-if="report" class="ai-report">
+            <small>{{ reportAI ? 'DeepSeek 分析' : '本地基础报告' }}</small>
+            <div class="text-block">{{ report }}</div>
+          </div></template
         >
-        <div class="preview-controls">
-          <el-button-group>
-            <el-button @click="zoomIn">
-              <el-icon><ZoomIn /></el-icon>
-              放大
-            </el-button>
-            <el-button @click="zoomOut">
-              <el-icon><ZoomOut /></el-icon>
-              缩小
-            </el-button>
-            <el-button @click="resetZoom">
-              <el-icon><RefreshRight /></el-icon>
-              重置
-            </el-button>
-            <el-button @click="downloadImage">
-              <el-icon><Download /></el-icon>
-              下载
-            </el-button>
-          </el-button-group>
-          <div class="zoom-info">
-            缩放: {{ Math.round(zoomLevel * 100) }}%
-          </div>
+      </section>
+    </div>
+    <el-dialog v-model="keyDialog" title="AI 连接配置" width="460px"
+      ><el-form label-position="top"
+        ><el-form-item label="本次会话 API Key"
+          ><el-input
+            v-model="keyInput"
+            type="password"
+            show-password
+            placeholder="留空使用服务端配置" /></el-form-item></el-form
+      ><template #footer
+        ><el-button @click="clearKey">清除会话 Key</el-button
+        ><el-button type="primary" @click="saveKey">保存</el-button></template
+      ></el-dialog
+    >
+    <el-dialog v-model="chatOpen" title="检测结果问答" width="640px"
+      ><div class="chat-context">
+        {{ snapshot?.scenarioLabel }} · {{ fileName(snapshot?.model) }} ·
+        {{ detections.length }} 个目标
+      </div>
+      <div ref="chatBox" class="chat-log" aria-live="polite">
+        <div v-if="!messages.length" class="empty-state">
+          <el-icon><ChatDotRound /></el-icon><strong>这次检测结果可靠吗？</strong>
+        </div>
+        <div v-for="(message, i) in messages" :key="i" class="chat-row" :class="message.role">
+          <small>{{
+            message.role === 'user' ? '你' : message.local ? '本地回答' : '检测助手'
+          }}</small>
+          <p class="text-block">{{ message.content }}</p>
+        </div>
+        <div v-if="chatLoading" class="thinking">
+          <el-icon class="spinner"><Loading /></el-icon>正在分析检测结果…
         </div>
       </div>
-    </el-dialog>
-
-    <!-- 视频预览对话框 -->
-    <el-dialog
-      v-model="showVideoPreview"
-      title="检测结果 - 全屏查看"
-      width="90%"
-      top="5vh"
-      destroy-on-close
-      @close="closeVideoPreview"
-    >
-      <div class="preview-container">
-        <video
-          v-if="previewVideoUrl"
-          :src="previewVideoUrl"
-          class="preview-video"
-          controls
-          autoplay
+      <form class="chat-compose" @submit.prevent="sendChat">
+        <el-input
+          v-model="chatInput"
+          aria-label="检测问题"
+          placeholder="输入关于本次检测的问题"
+          :disabled="chatLoading"
+          maxlength="2000"
+        /><el-button
+          type="primary"
+          :loading="chatLoading"
+          :disabled="!chatInput.trim()"
+          native-type="submit"
+          >发送</el-button
         >
-          您的浏览器不支持视频播放
-        </video>
-        <div class="preview-controls">
-          <el-button @click="downloadVideo">
-            <el-icon><Download /></el-icon>
-            下载视频
-          </el-button>
-        </div>
-      </div>
-    </el-dialog>
-
-    <!-- 智能问答对话框 -->
-    <el-dialog
-      v-model="showChatDialog"
-      title="检测结果智能问答"
-      width="680px"
-      destroy-on-close
+      </form></el-dialog
     >
-      <div class="chat-panel">
-        <div class="chat-messages" ref="chatMessagesBox">
-          <div
-            v-for="(message, index) in chatMessages"
-            :key="index"
-            class="chat-message"
-            :class="message.role"
-          >
-            <div class="chat-bubble">{{ message.content }}</div>
-          </div>
-          <div v-if="chatLoading" class="chat-message assistant">
-            <div class="chat-bubble">正在分析当前检测结果...</div>
-          </div>
-        </div>
-
-        <div class="chat-input-row">
-          <el-input
-            v-model="chatInput"
-            type="textarea"
-            :rows="2"
-            placeholder="例如：这次检测结果可靠吗？为什么建议复核？"
-            @keyup.enter.exact.prevent="sendChatMessage"
-          />
-          <el-button
-            type="primary"
-            :loading="chatLoading"
-            @click="sendChatMessage"
-          >
-            发送
-          </el-button>
-        </div>
-      </div>
-    </el-dialog>
-
-    <!-- API Key设置对话框 -->
-    <el-dialog
-      v-model="showApiKeyDialog"
-      title="设置 DeepSeek API Key"
-      width="520px"
-    >
-      <el-alert
-        title="API Key 只会临时保存在当前浏览器会话中，关闭浏览器后失效，不会写入代码。"
-        type="info"
-        show-icon
-        :closable="false"
-        class="api-key-alert"
-      />
-      <el-input
-        v-model="deepseekApiKeyInput"
-        type="password"
-        placeholder="请输入 DeepSeek API Key"
-        show-password
-        clearable
-      />
-      <template #footer>
-        <el-button @click="showApiKeyDialog = false">取消</el-button>
-        <el-button type="primary" @click="saveDeepseekApiKey">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
-
-<script>
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useStore } from 'vuex'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import {
-  Picture,
-  VideoPlay,
-  Camera,
-  Plus,
-  Search,
-  RefreshRight,
-  ZoomIn,
-  ZoomOut,
-  Download,
-  Document,
-  ChatDotRound
-} from '@element-plus/icons-vue'
-
-export default {
-  name: 'Detection',
-  components: {
-    Picture,
-    VideoPlay,
-    Camera,
-    Plus,
-    Search,
-    RefreshRight,
-    ZoomIn,
-    ZoomOut,
-    Download,
-    Document,
-    ChatDotRound
-  },
-  data() {
-    return {
-      detectionMode: 'image',
-      selectedScenario: 'general',
-      scenarioOptions: [
-        { value: 'general', label: '通用检测' },
-        { value: 'drone', label: '无人机检测' },
-        { value: 'fire', label: '火灾检测' },
-        { value: 'flower', label: '花卉检测' },
-        { value: 'pest', label: '病虫害检测' }
-      ],
-      scenarioModels: [],
-      selectedScenarioModel: '',
-      scenarioModelLoading: false,
-      imageUrl: '',
-      videoUrl: '',
-      isCameraActive: false,
-      detectionResult: {},
-      realtimeDetections: [],
-      cameraStream: null,
-      detectionInterval: null,
-      uploadAction: '/api/detect_image',
-      videoUploadAction: '/api/detect_video',
-      videoLoading: false,
-      showImagePreview: false,
-      showVideoPreview: false,
-      previewImageUrl: '',
-      previewVideoUrl: '',
-      aiReport: '',
-      aiReportLoading: false,
-      showChatDialog: false,
-      chatMessages: [],
-      chatInput: '',
-      chatLoading: false,
-      showApiKeyDialog: false,
-      deepseekApiKeyInput: '',
-      hasDeepseekApiKey: false,
-      zoomLevel: 1,
-      imageWidth: 0,
-      imageHeight: 0,
-      isDragging: false,
-      dragStartX: 0,
-      dragStartY: 0
-    }
-  },
-  computed: {
-    canDetect() {
-      return (this.detectionMode === 'image' && this.imageUrl) ||
-             (this.detectionMode === 'video' && this.videoUrl)
-    }
-  },
-  mounted() {
-    this.hasDeepseekApiKey = !!sessionStorage.getItem('deepseek_api_key')
-    this.handleScenarioChange()
-  },
-  methods: {
-    getModeTitle() {
-      const titles = {
-        image: '图片上传检测',
-        video: '视频上传检测',
-        camera: '摄像头实时检测'
-      }
-      return titles[this.detectionMode]
-    },
-
-    handleModeChange() {
-      // 静默关闭摄像头，不显示提示
-      this.silentStopCamera()
-      this.resetUpload()
-      this.detectionResult = {}
-      this.resetAiAssistant()
-    },
-
-    async handleScenarioChange() {
-      this.resetAiAssistant()
-      await this.loadScenarioModels()
-    },
-
-    async loadScenarioModels() {
-      this.scenarioModelLoading = true
-      try {
-        const listResponse = await fetch(`/api/models/scenario/${this.selectedScenario}`)
-        const listData = await listResponse.json()
-        if (!listData.success) {
-          this.scenarioModels = []
-          this.selectedScenarioModel = ''
-          ElMessage.warning(listData.message || '未找到对应场景模型')
-          return
-        }
-        this.scenarioModels = listData.models || []
-        this.selectedScenarioModel = this.scenarioModels[0]?.path || ''
-        if (!this.selectedScenarioModel) {
-          ElMessage.warning('未找到对应场景模型，请先上传模型')
-          return
-        }
-        await this.loadSelectedScenarioModel()
-      } catch (error) {
-        ElMessage.error('场景模型列表加载失败: ' + error.message)
-      } finally {
-        this.scenarioModelLoading = false
-      }
-    },
-
-    async handleScenarioModelChange() {
-      this.resetAiAssistant()
-      await this.loadSelectedScenarioModel()
-    },
-
-    async loadSelectedScenarioModel() {
-      if (!this.selectedScenarioModel) return
-      try {
-        const response = await fetch('/api/models/load_by_scenario', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            scenario: this.selectedScenario,
-            model_path: this.selectedScenarioModel
-          })
-        })
-        const data = await response.json()
-        if (data.success) {
-          ElMessage.success(data.message || `已切换为：${this.getScenarioLabel(this.selectedScenario)}`)
-        } else {
-          ElMessage.warning(data.message || '未找到对应场景模型，请先上传模型')
-        }
-      } catch (error) {
-        ElMessage.error('场景模型切换失败: ' + error.message)
-      }
-    },
-
-    getScenarioLabel(value) {
-      const item = this.scenarioOptions.find(option => option.value === value)
-      return item ? item.label : '通用检测'
-    },
-
-    // 图片上传相关
-    beforeImageUpload(file) {
-      const isImage = file.type.startsWith('image/')
-      const isLt10M = file.size / 1024 / 1024 < 10
-
-      if (!isImage) {
-        ElMessage.error('只能上传图片文件!')
-        return false
-      }
-      if (!isLt10M) {
-        ElMessage.error('图片大小不能超过 10MB!')
-        return false
-      }
-
-      // 保存图片URL用于预览
-      this.imageUrl = URL.createObjectURL(file)
-      return true
-    },
-
-    handleImageSuccess(response) {
-      if (response.success) {
-        // 确保结果稳定显示
-        this.detectionResult = { ...response }
-        this.resetAiAssistant()
-        ElMessage.success('图片检测完成')
-      } else {
-        ElMessage.error(response.message)
-      }
-    },
-
-    // 视频上传相关
-    beforeVideoUpload(file) {
-      const isVideo = file.type.startsWith('video/')
-      const isLt100M = file.size / 1024 / 1024 < 100
-
-      if (!isVideo) {
-        ElMessage.error('只能上传视频文件!')
-        return false
-      }
-      if (!isLt100M) {
-        ElMessage.error('视频大小不能超过 100MB!')
-        return false
-      }
-
-      // 保存视频URL用于预览
-      this.videoUrl = URL.createObjectURL(file)
-      return true
-    },
-
-    handleVideoSuccess(response) {
-      if (response.success) {
-        // 确保结果稳定显示
-        this.detectionResult = { ...response }
-        this.resetAiAssistant()
-        ElMessage.success(`视频检测完成！处理了 ${response.processed_frames || 0} 帧，检测到 ${response.total_detections || 0} 个目标`)
-      } else {
-        ElMessage.error(response.message)
-      }
-    },
-
-    handleUploadError(error, file, fileList) {
-      console.error('上传错误详情:', error)
-      if (error.response) {
-        const errorData = error.response.data
-        if (errorData && errorData.message) {
-          ElMessage.error(`上传失败: ${errorData.message}`)
-        } else {
-          ElMessage.error(`上传失败: HTTP ${error.response.status}`)
-        }
-      } else {
-        ElMessage.error('上传失败: ' + error.message)
-      }
-    },
-
-    // 视频加载事件
-    onVideoLoadStart() {
-      this.videoLoading = true
-      console.log('视频开始加载...')
-    },
-
-    onVideoLoaded() {
-      this.videoLoading = false
-      console.log('视频加载完成')
-    },
-
-    handleImageError(event) {
-      console.error('图片加载错误:', event)
-      ElMessage.error('图片加载失败，请检查网络连接')
-    },
-
-    handleVideoError(event) {
-      console.error('视频加载错误:', event)
-      const video = event.target
-      let errorMessage = '视频加载失败'
-
-      if (video.error) {
-        switch (video.error.code) {
-          case 1: // MEDIA_ERR_ABORTED
-            errorMessage = '视频加载被中止'
-            break
-          case 2: // MEDIA_ERR_NETWORK
-            errorMessage = '视频网络加载错误'
-            break
-          case 3: // MEDIA_ERR_DECODE
-            errorMessage = '视频解码错误，格式可能不支持'
-            break
-          case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
-            errorMessage = '视频格式不支持或文件损坏'
-            break
-          default:
-            errorMessage = '视频播放出现未知错误'
-        }
-      }
-
-      ElMessage.error(errorMessage)
-
-      // 提供解决建议
-      this.$notify({
-        title: '视频加载失败',
-        message: '建议：1. 检查网络连接 2. 尝试其他视频格式 3. 重新上传视频',
-        type: 'warning',
-        duration: 8000
-      })
-    },
-
-    // 摄像头相关
-    async startCamera() {
-      try {
-        this.cameraStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user'
-          }
-        })
-
-        if (this.$refs.cameraVideo) {
-          this.$refs.cameraVideo.srcObject = this.cameraStream
-          this.isCameraActive = true
-
-          // 等待视频加载后开始检测
-          this.$refs.cameraVideo.onloadedmetadata = () => {
-            this.startRealtimeDetection()
-          }
-
-          ElMessage.success('摄像头已启动')
-        }
-      } catch (error) {
-        ElMessage.error('无法访问摄像头: ' + error.message)
-      }
-    },
-
-    stopCamera() {
-      this.silentStopCamera()
-      ElMessage.success('摄像头已关闭')
-    },
-
-    silentStopCamera() {
-      if (this.cameraStream) {
-        this.cameraStream.getTracks().forEach(track => track.stop())
-        this.cameraStream = null
-      }
-      if (this.detectionInterval) {
-        clearInterval(this.detectionInterval)
-        this.detectionInterval = null
-      }
-      this.isCameraActive = false
-      this.realtimeDetections = []
-    },
-
-    startRealtimeDetection() {
-      if (this.detectionInterval) {
-        clearInterval(this.detectionInterval)
-      }
-
-      this.detectionInterval = setInterval(async () => {
-        if (this.isCameraActive && this.$refs.cameraVideo && this.$refs.cameraVideo.readyState === 4) {
-          const canvas = this.$refs.cameraCanvas
-          const video = this.$refs.cameraVideo
-          const ctx = canvas.getContext('2d')
-
-          canvas.width = video.videoWidth
-          canvas.height = video.videoHeight
-
-          if (canvas.width > 0 && canvas.height > 0) {
-            ctx.drawImage(video, 0, 0)
-            const imageData = canvas.toDataURL('image/jpeg', 0.8)
-
-            try {
-              const result = await this.$store.dispatch('processFrame', imageData)
-              if (result.success) {
-                // 使用Vue的响应式更新，避免闪烁
-                this.$nextTick(() => {
-                  this.realtimeDetections = [...result.detections]
-                })
-              }
-            } catch (error) {
-              console.error('实时检测失败:', error)
-            }
-          }
-        }
-      }, 1000) // 降低检测频率到1秒，减少闪烁
-    },
-
-    // 检测相关
-    async startDetection() {
-      if (this.detectionMode === 'image' && this.imageUrl) {
-        ElMessage.info('请重新上传图片以触发检测')
-      } else if (this.detectionMode === 'video' && this.videoUrl) {
-        ElMessage.info('请重新上传视频以触发检测')
-      }
-    },
-
-    resetUpload() {
-      // 清理旧的URL
-      if (this.imageUrl && this.imageUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(this.imageUrl)
-      }
-      if (this.videoUrl && this.videoUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(this.videoUrl)
-      }
-
-      this.imageUrl = ''
-      this.videoUrl = ''
-      this.detectionResult = {}
-      this.resetAiAssistant()
-    },
-
-    resetAll() {
-      this.resetUpload()
-      this.silentStopCamera()
-    },
-
-    // 结果显示相关
-    getResultImageUrl() {
-      return this.detectionResult.result_image
-    },
-
-    getResultVideoUrl() {
-      return this.detectionResult.result_video
-    },
-
-    formatBbox(bbox) {
-      if (!bbox || bbox.length !== 4) return ''
-      return `(${Math.round(bbox[0])}, ${Math.round(bbox[1])}) - (${Math.round(bbox[2])}, ${Math.round(bbox[3])})`
-    },
-
-    formatPercent(value) {
-      return `${Math.round((value || 0) * 100)}%`
-    },
-
-    formatNumber(value) {
-      return Number(value || 0).toFixed(2)
-    },
-
-    getDeepseekApiKey() {
-      return sessionStorage.getItem('deepseek_api_key') || ''
-    },
-
-    ensureDeepseekApiKey() {
-      if (this.getDeepseekApiKey()) {
-        return true
-      }
-      this.deepseekApiKeyInput = ''
-      this.showApiKeyDialog = true
-      ElMessage.info('请先设置 DeepSeek API Key')
-      return false
-    },
-
-    saveDeepseekApiKey() {
-      const apiKey = this.deepseekApiKeyInput.trim()
-      if (!apiKey) {
-        ElMessage.warning('请输入 DeepSeek API Key')
-        return
-      }
-      sessionStorage.setItem('deepseek_api_key', apiKey)
-      this.hasDeepseekApiKey = true
-      this.deepseekApiKeyInput = ''
-      this.showApiKeyDialog = false
-      ElMessage.success('API Key 已保存到当前浏览器会话')
-    },
-
-    clearDeepseekApiKey() {
-      sessionStorage.removeItem('deepseek_api_key')
-      this.hasDeepseekApiKey = false
-      this.deepseekApiKeyInput = ''
-      ElMessage.success('API Key 已清除')
-    },
-
-    resetAiAssistant() {
-      this.aiReport = ''
-      this.chatMessages = []
-      this.chatInput = ''
-    },
-
-    async generateAiReport() {
-      if (!this.detectionResult.analysis) {
-        ElMessage.warning('请先完成检测')
-        return
-      }
-      if (!this.ensureDeepseekApiKey()) return
-
-      this.aiReportLoading = true
-      try {
-        const response = await fetch('/api/analysis/report', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            analysis: this.detectionResult.analysis,
-            detections: this.detectionResult.detections || [],
-            detection_type: this.detectionMode,
-            scenario: this.selectedScenario,
-            api_key: this.getDeepseekApiKey()
-          })
-        })
-        const data = await response.json()
-
-        if (data.success) {
-          this.aiReport = data.report
-          if (data.ai_enabled) {
-            ElMessage.success('AI报告生成成功')
-          } else {
-            ElMessage.warning(data.message || '已生成本地基础报告')
-          }
-        } else {
-          ElMessage.error(data.message)
-        }
-      } catch (error) {
-        ElMessage.error('AI报告生成失败: ' + error.message)
-      } finally {
-        this.aiReportLoading = false
-      }
-    },
-
-    openChatDialog() {
-      if (!this.detectionResult.analysis) {
-        ElMessage.warning('请先完成检测')
-        return
-      }
-      if (!this.ensureDeepseekApiKey()) return
-
-      if (this.chatMessages.length === 0) {
-        this.chatMessages.push({
-          role: 'assistant',
-          content: '你好，我可以根据当前检测结果回答问题，比如检测是否可靠、为什么建议复核、主要目标是什么。'
-        })
-      }
-      this.showChatDialog = true
-    },
-
-    async sendChatMessage() {
-      const content = this.chatInput.trim()
-      if (!content || this.chatLoading) return
-
-      this.chatMessages.push({ role: 'user', content })
-      this.chatInput = ''
-      this.chatLoading = true
-
-      try {
-        const response = await fetch('/api/analysis/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            message: content,
-            messages: this.chatMessages.slice(0, -1).filter(item => item.role === 'user' || item.role === 'assistant'),
-            analysis: this.detectionResult.analysis,
-            detections: this.detectionResult.detections || [],
-            scenario: this.selectedScenario,
-            api_key: this.getDeepseekApiKey()
-          })
-        })
-        const data = await response.json()
-
-        if (data.success) {
-          this.chatMessages.push({
-            role: 'assistant',
-            content: data.reply
-          })
-          if (!data.ai_enabled) {
-            ElMessage.warning(data.message || '当前返回的是本地基础回答')
-          }
-        } else {
-          ElMessage.error(data.message)
-        }
-      } catch (error) {
-        ElMessage.error('智能问答失败: ' + error.message)
-      } finally {
-        this.chatLoading = false
-        this.$nextTick(() => {
-          const box = this.$refs.chatMessagesBox
-          if (box) box.scrollTop = box.scrollHeight
-        })
-      }
-    },
-
-    getDetectionBoxStyle(detection) {
-      if (!detection.bbox || !this.$refs.cameraVideo) return {}
-
-      const video = this.$refs.cameraVideo
-      const container = video.parentElement
-      const videoRect = video.getBoundingClientRect()
-      const containerRect = container.getBoundingClientRect()
-
-      const [x1, y1, x2, y2] = detection.bbox
-
-      // 计算缩放比例
-      const scaleX = videoRect.width / video.videoWidth
-      const scaleY = videoRect.height / video.videoHeight
-
-      // 计算相对于容器的位置
-      const left = (videoRect.left - containerRect.left) + (x1 * scaleX)
-      const top = (videoRect.top - containerRect.top) + (y1 * scaleY)
-      const width = (x2 - x1) * scaleX
-      const height = (y2 - y1) * scaleY
-
-      return {
-        position: 'absolute',
-        left: `${left}px`,
-        top: `${top}px`,
-        width: `${width}px`,
-        height: `${height}px`,
-        border: '2px solid #00ff00',
-        backgroundColor: 'rgba(0, 255, 0, 0.1)',
-        pointerEvents: 'none',
-        zIndex: 10
-      }
-    },
-
-    openImagePreview(imageUrl) {
-      this.previewImageUrl = imageUrl
-      this.showImagePreview = true
-    },
-
-    openVideoPreview(videoUrl) {
-      this.previewVideoUrl = videoUrl
-      this.showVideoPreview = true
-    },
-
-    closeImagePreview() {
-      this.showImagePreview = false
-      this.previewImageUrl = ''
-    },
-
-    closeVideoPreview() {
-      this.showVideoPreview = false
-      this.previewVideoUrl = ''
-    },
-
-    onPreviewImageLoad() {
-      const image = new Image()
-      image.src = this.previewImageUrl
-      image.onload = () => {
-        this.imageWidth = image.width
-        this.imageHeight = image.height
-      }
-    },
-
-    onPreviewImageError(event) {
-      console.error('图片加载错误:', event)
-      ElMessage.error('图片加载失败，请检查网络连接')
-    },
-
-    zoomIn() {
-      this.zoomLevel += 0.1
-      if (this.zoomLevel > 3) this.zoomLevel = 3
-    },
-
-    zoomOut() {
-      this.zoomLevel -= 0.1
-      if (this.zoomLevel < 0.1) this.zoomLevel = 0.1
-    },
-
-    resetZoom() {
-      this.zoomLevel = 1
-    },
-
-    handleWheel(event) {
-      event.preventDefault()
-      const delta = event.deltaY > 0 ? -0.05 : 0.05
-      this.zoomLevel += delta
-      if (this.zoomLevel > 3) this.zoomLevel = 3
-      if (this.zoomLevel < 0.1) this.zoomLevel = 0.1
-    },
-
-    startDrag(event) {
-      this.isDragging = true
-      this.dragStartX = event.clientX
-      this.dragStartY = event.clientY
-    },
-
-    drag(event) {
-      if (!this.isDragging) return
-      // 这里可以实现图片拖拽移动功能
-    },
-
-    endDrag() {
-      this.isDragging = false
-    },
-
-    downloadImage() {
-      if (!this.previewImageUrl) return
-
-      const link = document.createElement('a')
-      link.href = this.previewImageUrl
-      link.download = `检测结果_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.jpg`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-
-      ElMessage.success('图片下载已开始')
-    },
-
-    downloadVideo() {
-      if (!this.previewVideoUrl) return
-
-      const link = document.createElement('a')
-      link.href = this.previewVideoUrl
-      link.download = `检测结果_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.mp4`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-
-      ElMessage.success('视频下载已开始')
-    }
-  },
-
-  beforeUnmount() {
-    this.silentStopCamera()
-    this.resetUpload()
+import { api, scenes, percent, fileName, saveFile } from '../lib/workspace'
+const store = useStore(),
+  route = useRoute()
+const modes = [
+  { value: 'image', label: '图片', icon: 'Picture' },
+  { value: 'video', label: '视频', icon: 'VideoPlay' },
+  { value: 'camera', label: '实时', icon: 'VideoCamera' },
+]
+const scenario = ref(
+    scenes.some((s) => s.value === route.query.scene) ? route.query.scene : 'general'
+  ),
+  mode = ref('image')
+const models = ref([]),
+  selectedModel = ref(''),
+  classes = ref([]),
+  ready = ref(false),
+  modelBusy = ref(false)
+const file = ref(null),
+  sourceUrl = ref(''),
+  previewMode = ref('original'),
+  result = ref(null),
+  confidence = ref(scenario.value === 'pest' ? 0.05 : 0.25)
+const error = ref(''),
+  dragging = ref(false),
+  running = ref(false),
+  elapsed = ref(''),
+  snapshot = ref(null),
+  targetPage = ref(1)
+const fileInput = ref(null),
+  cameraVideo = ref(null),
+  cameraCanvas = ref(null),
+  cameraActive = ref(false),
+  cameraStarting = ref(false)
+const report = ref(''),
+  reportLoading = ref(false),
+  reportAI = ref(false),
+  keyDialog = ref(false),
+  keyInput = ref(sessionStorage.getItem('deepseek_api_key') || '')
+const chatOpen = ref(false),
+  chatInput = ref(''),
+  messages = ref([]),
+  chatLoading = ref(false),
+  chatBox = ref(null)
+let stream = null,
+  cameraTimer = null,
+  alive = true,
+  cameraGeneration = 0
+const scene = computed(() => scenes.find((s) => s.value === scenario.value))
+const sceneRole = computed(
+  () =>
+    ({
+      general: '通用目标检测助手',
+      drone: '低空安全监测助手',
+      fire: '安全预警助手',
+      flower: '花卉识别助手',
+      pest: '农业植保助手',
+    }[scenario.value])
+)
+const locked = computed(
+  () =>
+    running.value ||
+    modelBusy.value ||
+    cameraActive.value ||
+    cameraStarting.value ||
+    reportLoading.value ||
+    chatLoading.value
+)
+const detections = computed(() => result.value?.detections || [])
+const resultUrl = computed(() => result.value?.result_image || result.value?.result_video || '')
+const mediaUrl = computed(() =>
+  previewMode.value === 'result' && resultUrl.value ? resultUrl.value : sourceUrl.value
+)
+const stats = computed(() => {
+  const counts = Object.create(null)
+  let total = 0,
+    max = 0,
+    low = 0
+  for (const detection of detections.value) {
+    const value = Number(detection.confidence || 0)
+    total += value
+    max = Math.max(max, value)
+    low += value < 0.6 ? 1 : 0
+    counts[detection.class] = (counts[detection.class] || 0) + 1
+  }
+  return { avg: detections.value.length ? total / detections.value.length : 0, max, low, counts }
+})
+function resetConfidence() {
+  confidence.value = scenario.value === 'pest' ? 0.05 : 0.25
+  clearResult()
+}
+function clearResult() {
+  result.value = null
+  snapshot.value = null
+  report.value = ''
+  messages.value = []
+  previewMode.value = 'original'
+  targetPage.value = 1
+  elapsed.value = ''
+}
+function resetFile() {
+  if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value)
+  sourceUrl.value = ''
+  file.value = null
+  if (fileInput.value) fileInput.value.value = ''
+  clearResult()
+}
+function setMode(value) {
+  if (locked.value || mode.value === value) return
+  stopCamera()
+  resetFile()
+  mode.value = value
+}
+async function selectScene(value) {
+  if (locked.value || scenario.value === value) return
+  scenario.value = value
+  confidence.value = value === 'pest' ? 0.05 : 0.25
+  clearResult()
+  await loadScene()
+}
+async function loadScene() {
+  modelBusy.value = true
+  ready.value = false
+  error.value = ''
+  models.value = []
+  selectedModel.value = ''
+  try {
+    const data = await api(`/models/scenario/${scenario.value}`)
+    if (!alive) return
+    models.value = data.models || []
+    selectedModel.value =
+      models.value.find((m) => m.path === route.query.model)?.path ||
+      models.value.find((m) => m.path === data.current_model)?.path ||
+      models.value[0]?.path ||
+      ''
+    if (selectedModel.value) await loadModel()
+    else error.value = '该场景没有可用模型，请先在模型资源中上传。'
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    modelBusy.value = false
   }
 }
+async function loadModel() {
+  modelBusy.value = true
+  ready.value = false
+  clearResult()
+  error.value = ''
+  try {
+    const data = await api('/models/load_by_scenario', {
+      method: 'POST',
+      data: { scenario: scenario.value, model_path: selectedModel.value },
+    })
+    if (!alive) return
+    ready.value = data.current_model === selectedModel.value
+    classes.value = data.model_info?.classes || []
+    window.dispatchEvent(new Event('model-changed'))
+  } catch (e) {
+    error.value = e.message
+    classes.value = []
+  } finally {
+    modelBusy.value = false
+  }
+}
+function chooseFile(value) {
+  dragging.value = false
+  if (!value || locked.value) return
+  const allowed = mode.value === 'image' ? /\.(jpe?g|png|gif|bmp)$/i : /\.(mp4|avi|mov|mkv)$/i
+  if (!allowed.test(value.name)) {
+    ElMessage.error('文件格式不支持当前检测方式')
+    return
+  }
+  if (value.size > (mode.value === 'image' ? 10 : 100) * 1048576) {
+    ElMessage.error('文件超过大小限制')
+    return
+  }
+  resetFile()
+  file.value = value
+  sourceUrl.value = URL.createObjectURL(value)
+  error.value = ''
+}
+function dropFile(event) {
+  dragging.value = false
+  chooseFile(event.dataTransfer.files[0])
+}
+function makeSnapshot() {
+  return {
+    scenario: scenario.value,
+    scenarioLabel: scene.value.label,
+    model: selectedModel.value,
+    confidence: confidence.value,
+    mode: mode.value,
+    filename: file.value?.name || 'camera',
+    time: new Date().toISOString(),
+  }
+}
+async function detect() {
+  if (!file.value || !ready.value || locked.value) return
+  const context = makeSnapshot(),
+    form = new FormData()
+  form.append('file', file.value)
+  form.append('user_id', store.state.user.id)
+  form.append('confidence', context.confidence)
+  form.append('model_path', context.model)
+  clearResult()
+  error.value = ''
+  running.value = true
+  const start = performance.now()
+  try {
+    const data = await api(`/detect_${mode.value}`, { method: 'POST', data: form, timeout: 0 })
+    if (!alive) return
+    result.value = data
+    snapshot.value = context
+    elapsed.value = ((performance.now() - start) / 1000).toFixed(1)
+    previewMode.value = 'result'
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    running.value = false
+  }
+}
+async function startCamera() {
+  if (!ready.value || locked.value) return
+  cameraStarting.value = true
+  error.value = ''
+  clearResult()
+  const generation = ++cameraGeneration
+  try {
+    const acquired = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    })
+    if (!alive || generation !== cameraGeneration) {
+      acquired.getTracks().forEach((t) => t.stop())
+      return
+    }
+    stream = acquired
+    cameraVideo.value.srcObject = stream
+    await cameraVideo.value.play()
+    if (!alive || generation !== cameraGeneration) {
+      acquired.getTracks().forEach((t) => t.stop())
+      return
+    }
+    cameraActive.value = true
+    snapshot.value = makeSnapshot()
+    processCamera(generation)
+  } catch (e) {
+    error.value = `摄像头启动失败：${e.message}`
+    stopCamera()
+  } finally {
+    cameraStarting.value = false
+  }
+}
+async function processCamera(generation) {
+  if (!cameraActive.value || generation !== cameraGeneration) return
+  const video = cameraVideo.value,
+    canvas = cameraCanvas.value
+  if (!video.videoWidth) {
+    cameraTimer = setTimeout(() => processCamera(generation), 200)
+    return
+  }
+  const source = document.createElement('canvas')
+  source.width = video.videoWidth
+  source.height = video.videoHeight
+  source.getContext('2d').drawImage(video, 0, 0)
+  try {
+    const data = await api('/process_frame', {
+      method: 'POST',
+      data: {
+        image: source.toDataURL('image/jpeg', 0.8),
+        user_id: store.state.user.id,
+        confidence: confidence.value,
+        model_path: selectedModel.value,
+      },
+    })
+    if (!alive || generation !== cameraGeneration) return
+    result.value = data
+    canvas.width = source.width
+    canvas.height = source.height
+    const ctx = canvas.getContext('2d')
+    ctx.strokeStyle = '#69eea8'
+    ctx.fillStyle = '#69eea8'
+    ctx.lineWidth = 2
+    ctx.font = '14px sans-serif'
+    data.detections.forEach((d) => {
+      const [x1, y1, x2, y2] = d.bbox
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
+      ctx.fillText(`${d.class} ${percent(d.confidence)}`, Math.max(0, x1), Math.max(16, y1 - 5))
+    })
+    cameraTimer = setTimeout(() => processCamera(generation), 700)
+  } catch (e) {
+    if (generation === cameraGeneration) {
+      error.value = e.message
+      stopCamera()
+    }
+  }
+}
+function stopCamera() {
+  ++cameraGeneration
+  clearTimeout(cameraTimer)
+  stream?.getTracks().forEach((t) => t.stop())
+  stream = null
+  cameraActive.value = false
+}
+function exportResult() {
+  if (result.value)
+    saveFile(
+      JSON.stringify({ ...result.value, context: snapshot.value }, null, 2),
+      `detection-${Date.now()}.json`
+    )
+}
+function saveKey() {
+  const key = keyInput.value.trim()
+  if (key) sessionStorage.setItem('deepseek_api_key', key)
+  else sessionStorage.removeItem('deepseek_api_key')
+  keyDialog.value = false
+  ElMessage.success('AI 配置已保存')
+}
+function clearKey() {
+  sessionStorage.removeItem('deepseek_api_key')
+  keyInput.value = ''
+  keyDialog.value = false
+}
+function aiContext() {
+  return {
+    analysis: result.value?.analysis || {
+      detection_type: mode.value,
+      total_objects: detections.value.length,
+      avg_confidence: stats.value.avg,
+      max_confidence: stats.value.max,
+      class_counts: stats.value.counts,
+      review_required: !detections.value.length || stats.value.low > 0,
+    },
+    detections: detections.value,
+    scenario: snapshot.value?.scenario,
+    api_key: sessionStorage.getItem('deepseek_api_key') || '',
+  }
+}
+async function generateReport() {
+  if (!result.value || locked.value) return
+  reportLoading.value = true
+  try {
+    const data = await api('/analysis/report', { method: 'POST', data: aiContext() })
+    report.value = data.report
+    reportAI.value = data.ai_enabled
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    reportLoading.value = false
+  }
+}
+async function scrollChat() {
+  await nextTick()
+  if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight
+}
+async function sendChat() {
+  const content = chatInput.value.trim()
+  if (!content || chatLoading.value || !result.value) return
+  const history = messages.value.map(({ role, content }) => ({ role, content }))
+  messages.value.push({ role: 'user', content })
+  chatInput.value = ''
+  chatLoading.value = true
+  scrollChat()
+  try {
+    const data = await api('/analysis/chat', {
+      method: 'POST',
+      data: { ...aiContext(), message: content, messages: history },
+    })
+    messages.value.push({ role: 'assistant', content: data.reply, local: !data.ai_enabled })
+  } catch (e) {
+    messages.value.push({ role: 'assistant', content: e.message, local: true })
+  } finally {
+    chatLoading.value = false
+    scrollChat()
+  }
+}
+onMounted(loadScene)
+onBeforeRouteLeave(() => {
+  if (running.value || modelBusy.value) {
+    ElMessage.info('当前任务完成后可切换页面')
+    return false
+  }
+})
+onBeforeUnmount(() => {
+  alive = false
+  stopCamera()
+  if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value)
+})
 </script>
-
 <style scoped>
-.detection-container {
-  max-width: 1400px;
-  margin: 0 auto;
+.heading-separator {
+  color: #b5bdb6;
+  margin: 0 10px;
 }
-
-.mode-selector {
-  margin-bottom: 20px;
-}
-
-.scenario-selector {
-  margin-bottom: 20px;
-}
-
-.scenario-tip {
-  margin-top: 12px;
-  color: #71809d;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.scenario-model-row {
+.scene-tabs {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-  color: #52607d;
-  font-size: 14px;
-  font-weight: 800;
+  gap: 22px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+  overflow-x: auto;
 }
-
-.scenario-model-select {
-  width: min(520px, 100%);
-}
-
-.scenario-model-path {
-  float: right;
-  margin-left: 16px;
-  color: #94a3b8;
-  font-size: 12px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
-}
-
-.result-stats {
-  display: flex;
-  gap: 10px;
-}
-
-.upload-card, .result-card {
-  min-height: 600px;
-}
-
-.upload-section {
-  margin-bottom: 20px;
-}
-
-.image-uploader, .video-uploader {
-  width: 100%;
-}
-
-:deep(.el-upload) {
-  width: 100%;
-}
-
-:deep(.el-upload-dragger) {
-  width: 100%;
-  height: 300px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.upload-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-}
-
-.upload-icon {
-  font-size: 48px;
-  color: #c0c4cc;
-  margin-bottom: 20px;
-}
-
-.upload-text {
-  text-align: center;
-}
-
-.upload-text p {
-  margin: 5px 0;
-}
-
-.upload-tip {
-  color: #999;
-  font-size: 12px;
-}
-
-.uploaded-image, .uploaded-video {
-  max-width: 100%;
-  max-height: 300px;
-  border-radius: 8px;
-}
-
-.camera-section {
-  margin-bottom: 20px;
-}
-
-.camera-container {
+.scene-tabs button {
   position: relative;
-  width: 100%;
-  height: 300px;
-  border: 2px dashed #d9d9d9;
-  border-radius: 8px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.camera-overlay-container {
-  border-color: #409eff;
-}
-
-.camera-video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 8px;
-}
-
-.camera-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  visibility: hidden;
-}
-
-.camera-placeholder {
-  text-align: center;
-  color: #999;
-}
-
-.camera-icon {
-  font-size: 48px;
-  margin-bottom: 10px;
-}
-
-.camera-detection-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 10;
-}
-
-.detection-box {
-  position: absolute;
-  border: 2px solid #00ff00;
-  background: rgba(0, 255, 0, 0.1);
-  pointer-events: none;
-}
-
-.detection-label {
-  position: absolute;
-  top: -25px;
-  left: 0;
-  background: #00ff00;
-  color: black;
-  padding: 2px 6px;
-  font-size: 12px;
-  border-radius: 3px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.detection-controls {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.result-content {
-  position: relative;
-  min-height: 400px;
-}
-
-.result-media {
-  margin-bottom: 20px;
-  text-align: center;
-  position: relative;
-}
-
-.result-image, .result-video {
-  max-width: 100%;
-  max-height: 350px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  cursor: pointer;
-  transition: transform 0.3s ease;
-}
-
-.result-image:hover, .result-video:hover {
-  transform: scale(1.02);
-}
-
-.image-overlay, .video-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  border-radius: 8px;
-}
-
-.result-media:hover .image-overlay,
-.result-media:hover .video-overlay {
-  opacity: 1;
-}
-
-.analysis-panel {
-  margin-top: 20px;
-  padding: 16px;
-  background: #f8fbff;
-  border: 1px solid #d9ecff;
-  border-radius: 8px;
-}
-
-.analysis-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
-}
-
-.analysis-header h4 {
-  margin: 0;
-  color: #27304f;
-}
-
-.analysis-stats {
-  margin-bottom: 14px;
-}
-
-.analysis-stat {
-  min-height: 72px;
-  padding: 10px 6px;
-  background: white;
-  border-radius: 6px;
-  text-align: center;
-  border: 1px solid #edf2f7;
-}
-
-.stat-value {
-  display: block;
-  color: #409eff;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 26px;
-}
-
-.stat-label {
-  display: block;
-  margin-top: 4px;
-  color: #606266;
-  font-size: 12px;
-}
-
-.analysis-conclusion {
-  padding: 10px 12px;
-  color: #303133;
-  background: white;
-  border-left: 4px solid #409eff;
-  border-radius: 4px;
-  line-height: 1.6;
-}
-
-.ai-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.ai-report {
-  margin-top: 14px;
-  padding: 12px;
-  background: white;
-  border: 1px solid #edf2f7;
-  border-radius: 6px;
-}
-
-.ai-report-title {
-  margin-bottom: 8px;
-  color: #27304f;
-  font-weight: 600;
-}
-
-.ai-report-content {
-  color: #303133;
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-
-.video-analysis-details {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.video-metric {
-  min-height: 62px;
-  padding: 8px 6px;
-  background: white;
-  border: 1px solid #edf2f7;
-  border-radius: 6px;
-  text-align: center;
-}
-
-.video-metric-value {
-  display: block;
-  color: #67c23a;
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 24px;
-}
-
-.video-metric-label {
-  display: block;
-  margin-top: 4px;
-  color: #606266;
-  font-size: 12px;
-}
-
-.class-distribution {
-  margin-top: 14px;
-}
-
-.distribution-title {
-  display: block;
-  margin-bottom: 8px;
-  color: #606266;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.class-tags {
-  display: flex;
-  flex-wrap: wrap;
   gap: 8px;
+  flex-shrink: 0;
+  padding: 0 5px 15px;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  color: #7d8880;
 }
-
-.detection-list {
-  margin-top: 20px;
+.scene-tabs button.active {
+  color: var(--ink);
+  font-weight: 600;
 }
-
-.detection-list h4 {
-  margin-bottom: 15px;
-  color: #333;
+.scene-tabs .el-icon {
+  font-size: 17px;
 }
-
-.bbox-info {
-  font-family: monospace;
-  font-size: 12px;
-  color: #666;
-}
-
-.chat-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.chat-messages {
-  height: 360px;
-  padding: 12px;
-  overflow-y: auto;
-  background: #f5f7fa;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-}
-
-.chat-message {
-  display: flex;
-  margin-bottom: 10px;
-}
-
-.chat-message.user {
-  justify-content: flex-end;
-}
-
-.chat-message.assistant {
-  justify-content: flex-start;
-}
-
-.chat-bubble {
-  max-width: 78%;
-  padding: 10px 12px;
-  border-radius: 8px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-
-.chat-message.user .chat-bubble {
-  color: white;
-  background: #409eff;
-}
-
-.chat-message.assistant .chat-bubble {
-  color: #303133;
-  background: white;
-  border: 1px solid #e4e7ed;
-}
-
-.chat-input-row {
-  display: grid;
-  grid-template-columns: 1fr 82px;
-  gap: 10px;
-  align-items: end;
-}
-
-.api-key-alert {
-  margin-bottom: 14px;
-}
-
-.empty-result {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 300px;
-}
-
-.realtime-stats {
-  text-align: center;
-  margin-top: 20px;
-  padding: 10px;
-  background: #f5f7fa;
-  border-radius: 8px;
-}
-
-.loading-result {
+.tab-indicator {
   position: absolute;
-  top: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
   left: 0;
   right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
-
-.preview-container {
-  position: relative;
-  width: 100%;
-  height: 80vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f5f5f5;
-  border-radius: 8px;
+.detection-layout {
+  display: grid;
+  grid-template-columns: 266px minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
   overflow: hidden;
 }
-
-.preview-image {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  transition: transform 0.1s ease;
-  user-select: none;
+.control-panel {
+  padding: 22px;
+  border-right: 1px solid var(--line);
 }
-
-.preview-video {
+.control-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+.control-title h2 {
+  font-size: 14px;
+}
+.step-label {
+  font: 12px monospace;
+  color: #b2bbb4;
+}
+.field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #5e6d62;
+  margin: 19px 0 9px;
+}
+.field-label > span {
+  font-size: 10px;
+  color: #9fa8a1;
+}
+.input-modes {
+  display: flex;
+  width: 100%;
+}
+.input-modes button {
+  flex: 1;
+  padding: 5px 8px;
+}
+.control-panel .el-select {
+  width: 100%;
+}
+.model-state {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+.model-state .status-label {
+  font-size: 10px;
+}
+.retry-link,
+.slider-labels button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 10px;
+}
+.resource-link {
+  font-size: 11px;
+  color: var(--accent);
+}
+.confidence-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 22px;
+}
+.confidence-label .field-label {
+  margin: 0;
+}
+.confidence-label .mono {
+  font-size: 13px;
+}
+.slider-labels {
+  display: flex;
+  justify-content: space-between;
+  color: #a5ada6;
+  font-size: 10px;
+}
+.threshold-note {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 10px;
+  color: #a47725;
+  margin-top: 12px;
+}
+.upload-divider {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+}
+.hidden-file {
+  display: none;
+}
+.upload-drop {
+  width: 100%;
+  min-height: 119px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed #cbd7cd;
+  border-radius: 5px;
+  background: #fbfdfb;
+  color: #6b8072;
+  padding: 13px 8px;
+}
+.upload-drop > .el-icon {
+  font-size: 23px;
+  color: #82998a;
+}
+.upload-drop strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.upload-drop small {
+  font-size: 9px;
+}
+.upload-drop.is-dragging {
+  background: #e4f1e7;
+  border-color: var(--accent);
+}
+.selected-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 0;
+  font-size: 11px;
+}
+.selected-file > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.selected-file small {
+  display: block;
+  font-size: 10px;
+}
+.selected-file .icon-button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  font-size: 13px;
+}
+.run-button {
+  width: 100%;
+  margin-top: 17px;
+  height: 39px;
+}
+.config-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #9da69e;
+  font-size: 10px;
+  margin-top: 12px;
+}
+.camera-info {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 30px 0;
+  color: var(--muted);
+}
+.output-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.preview-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  gap: 10px;
+}
+.preview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preview-title h2 {
+  font-size: 13px;
+}
+.preview-title > .el-icon {
+  color: #8d9b90;
+}
+.visual-stage {
+  position: relative;
+  min-height: 310px;
+  flex: 1;
+  background-color: #f7f9f7;
+  background-image: repeating-linear-gradient(0deg, transparent, transparent 31px, #e9eee978 32px),
+    repeating-linear-gradient(90deg, transparent, transparent 31px, #e9eee978 32px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 340px;
+}
+.visual-stage.has-media {
+  background: #18231f;
+}
+.visual-stage > .el-image,
+.visual-stage > video {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  object-fit: contain;
+}
+.visual-stage :deep(.el-image__inner) {
+  object-fit: contain;
+}
+.camera-overlay {
+  position: absolute;
   width: 100%;
   height: 100%;
   object-fit: contain;
-  border-radius: 8px;
+  inset: 0;
+  pointer-events: none;
 }
-
-.preview-controls {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: rgba(0, 0, 0, 0.7);
-  padding: 10px;
-  border-radius: 8px;
+.invisible {
+  visibility: hidden;
+}
+.stage-empty {
   display: flex;
+  align-items: center;
   flex-direction: column;
-  gap: 10px;
-  backdrop-filter: blur(10px);
+  gap: 14px;
+  color: #9aa99e;
 }
-
-.preview-controls .el-button {
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: white;
+.stage-empty strong {
+  font-size: 14px;
+  color: #83978a;
+  font-weight: 400;
 }
-
-.preview-controls .el-button:hover {
-  background: rgba(255, 255, 255, 0.3);
+.stage-empty > span:last-child {
+  font: 10px monospace;
+  color: #a8b6ac;
 }
-
-.zoom-info {
-  color: white;
-  font-size: 12px;
-  text-align: center;
-  margin-top: 5px;
-  padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+.stage-empty > .el-icon {
+  font-size: 35px;
 }
-
-:deep(.el-radio-button__inner) {
-  padding: 12px 20px;
+.empty-crosshair {
+  border: 1px solid #dae4dc;
+  border-radius: 7px;
+  width: 60px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  background: #fdfefd;
 }
-
-/* ===== 页面美化增强：网站化卡片、上传区、结果区 ===== */
-.detection-container {
-  max-width: 1440px;
-}
-
-.mode-selector {
-  margin-bottom: 24px;
-}
-
-.mode-selector :deep(.el-card__body) {
+.preview-footer {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  color: #8a978e;
 }
-
-.card-header {
-  color: #27304f;
-  font-size: 16px;
-  font-weight: 900;
+.preview-footer .mono {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.card-header span:first-child {
-  display: inline-flex;
+.preview-footer > span:last-child {
+  flex-shrink: 0;
+}
+.result-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  padding: 20px 0;
+}
+.result-metrics > div {
+  padding: 0 20px;
+  border-left: 1px solid var(--line);
+}
+.result-metrics > div:first-child {
+  border: 0;
+}
+.result-metrics span {
+  display: block;
+  font-size: 10px;
+  color: #939e96;
+}
+.result-metrics strong {
+  font-size: 24px;
+  font-weight: 500;
+  color: #3d5145;
+  font-variant-numeric: tabular-nums;
+}
+.amber {
+  color: #af813b !important;
+}
+.result-bottom {
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 30px;
+}
+.targets-section,
+.insights-section {
+  min-width: 0;
+}
+.result-bottom h2 {
+  font-size: 14px;
+}
+.result-bottom h2 small {
+  margin-left: 6px;
+}
+.download-link {
+  display: flex;
   align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.insights-section {
+  padding-left: 25px;
+  border-left: 1px solid var(--line);
+}
+.insights-section h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.insight-empty {
+  font-size: 12px;
+  padding-top: 26px;
+}
+.analysis-summary {
+  font-size: 12px;
+  color: #809086;
+  margin: 16px 0;
+}
+.ai-report {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.ai-report small {
+  font-size: 10px;
+  color: var(--accent);
+}
+.target-pagination {
+  margin-top: 12px;
+}
+.chat-context {
+  color: var(--muted);
+  font-size: 11px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.chat-log {
+  height: 340px;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+.chat-row {
+  padding: 12px 14px;
+  margin: 10px 25px 10px 0;
+  background: #f5f7f5;
+  border-radius: 6px;
+}
+.chat-row.user {
+  margin: 10px 0 10px 25px;
+  background: #edf5ef;
+}
+.chat-row small {
+  color: #8f9d93;
+  font-size: 10px;
+}
+.chat-compose {
+  display: flex;
   gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
-
-.card-header span:first-child::before {
-  content: '';
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #7c83f5, #7dd3fc);
-  box-shadow: 0 0 0 5px rgba(124, 131, 245, .12);
+.thinking {
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
 }
-
-:deep(.el-radio-group) {
-  padding: 6px;
-  border: 1px solid rgba(203, 213, 225, .62);
-  border-radius: 18px;
-  background: #f8fafc;
-}
-
-:deep(.el-radio-button__inner) {
-  min-width: 126px;
-  border: none !important;
-  border-radius: 14px !important;
-  background: transparent !important;
-  color: #475569;
-  font-weight: 800;
-  box-shadow: none !important;
-}
-
-:deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  color: #fff;
-  background: linear-gradient(135deg, #7c83f5, #7dd3fc) !important;
-  box-shadow: 0 12px 24px rgba(124, 131, 245, .24) !important;
-}
-
-.upload-card, .result-card {
-  min-height: 650px;
-}
-
-:deep(.el-upload-dragger) {
-  height: 338px;
-  border: 1.5px dashed rgba(124, 131, 245, .35);
-  border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,250,252,.9)),
-    radial-gradient(circle at center, rgba(124, 131, 245, .10), transparent 55%);
-  transition: all .25s ease;
-}
-
-:deep(.el-upload-dragger:hover) {
-  border-color: #7c83f5;
-  transform: translateY(-2px);
-  box-shadow: 0 18px 40px rgba(124, 131, 245, .12);
-}
-
-.upload-icon,
-.camera-icon {
-  color: #7c83f5;
-  font-size: 56px;
-  margin-bottom: 18px;
-  filter: drop-shadow(0 10px 16px rgba(124, 131, 245, .18));
-}
-
-.upload-text p:first-child {
-  color: #27304f;
-  font-size: 16px;
-  font-weight: 900;
-}
-
-.upload-text em {
-  color: #7c83f5;
-  font-style: normal;
-}
-
-.upload-tip {
-  margin-top: 8px !important;
-  color: #64748b;
-}
-
-.uploaded-image,
-.uploaded-video,
-.result-image,
-.result-video {
-  border: 1px solid rgba(203, 213, 225, .72);
-  border-radius: 20px;
-  background: #020617;
-  box-shadow: 0 18px 42px rgba(71, 85, 105, .14);
-}
-
-.camera-container {
-  height: 338px;
-  border: 1.5px dashed rgba(124, 131, 245, .35);
-  border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,250,252,.9)),
-    radial-gradient(circle at center, rgba(125, 211, 252, .10), transparent 56%);
-}
-
-.camera-overlay-container {
-  border-style: solid;
-  border-color: rgba(124, 131, 245, .6);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.45), 0 18px 40px rgba(124, 131, 245, .12);
-}
-
-.camera-video {
-  border-radius: 20px;
-}
-
-.detection-box {
-  border: 2px solid #22c55e;
-  background: rgba(34, 197, 94, .12);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .85), 0 0 22px rgba(34, 197, 94, .38);
-}
-
-.detection-label {
-  top: -30px;
-  border-radius: 999px;
-  background: #22c55e;
-  color: #052e16;
-  font-weight: 900;
-  box-shadow: 0 10px 20px rgba(34, 197, 94, .25);
-}
-
-.detection-controls {
-  gap: 12px;
-  margin-top: 24px;
-}
-
-.result-content {
-  min-height: 454px;
-}
-
-.result-media {
-  padding: 10px;
-  border-radius: 24px;
-  background: linear-gradient(180deg, #f8fafc, #fff);
-  border: 1px solid rgba(226, 232, 240, .85);
-}
-
-.image-overlay,
-.video-overlay {
-  border-radius: 20px;
-  background: rgba(71, 85, 105, .56);
-  backdrop-filter: blur(4px);
-}
-
-.analysis-panel,
-.ai-report-section,
-.detection-list,
-.no-result {
-  border-radius: 20px !important;
-}
-
-.analysis-panel {
-  padding: 18px;
-  border: 1px solid rgba(124, 131, 245, .18);
-  background: linear-gradient(180deg, rgba(239, 246, 255, .9), rgba(255, 255, 255, .95));
-  box-shadow: 0 14px 34px rgba(124, 131, 245, .08);
-}
-
-.analysis-stat {
-  border: 1px solid rgba(226, 232, 240, .9);
-  border-radius: 16px;
-  box-shadow: 0 8px 18px rgba(71, 85, 105, .04);
-}
-
-.stat-value {
-  color: #7c83f5;
-  font-size: 22px;
-}
-
-.analysis-conclusion {
-  border-left: none;
-  border-radius: 16px;
-  background: #fff;
-  box-shadow: inset 4px 0 0 #7c83f5, 0 8px 20px rgba(71, 85, 105, .04);
-}
-
-@media (max-width: 1180px) {
-  :deep(.el-col-12) {
-    max-width: 100%;
-    flex: 0 0 100%;
+@media (max-width: 1100px) {
+  .detection-layout {
+    grid-template-columns: 235px minmax(0, 1fr);
   }
-  .result-card {
-    margin-top: 22px;
+  .control-panel {
+    padding: 18px;
+  }
+  .preview-toolbar {
+    padding: 14px;
+  }
+  .result-metrics > div {
+    padding: 0 10px;
+  }
+  .result-metrics strong {
+    font-size: 20px;
+  }
+  .scene-tabs {
+    gap: 18px;
   }
 }
-
+@media (max-width: 760px) {
+  .detection-layout {
+    grid-template-columns: 1fr;
+  }
+  .control-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .visual-stage {
+    min-height: 250px;
+    height: 300px;
+  }
+  .result-bottom {
+    grid-template-columns: 1fr;
+  }
+  .insights-section {
+    border: 0;
+    border-top: 1px solid var(--line);
+    padding: 20px 0 0;
+  }
+  .preview-title .el-tag {
+    display: none;
+  }
+  .scene-tabs {
+    gap: 14px;
+  }
+  .scene-tabs button {
+    font-size: 12px;
+  }
+  .result-metrics {
+    padding: 15px 0;
+  }
+  .result-metrics strong {
+    font-size: 19px;
+  }
+}
 </style>

@@ -1,597 +1,484 @@
 <template>
-  <div class="model-manager">
-    <el-card class="header-card" shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>模型管理</span>
-          <div class="header-actions">
-            <el-button type="primary" @click="refreshModels" :loading="loading">
-              <el-icon><Refresh /></el-icon>
-              刷新列表
-            </el-button>
-            <el-button type="success" @click="showUploadDialog = true">
-              <el-icon><Upload /></el-icon>
-              上传模型
-            </el-button>
-          </div>
-        </div>
-      </template>
-      
-      <!-- 当前模型信息 -->
-      <div class="current-model-info">
-        <el-alert
-          title="当前使用的模型"
-          :description="`${currentModel.path} (${currentModel.class_count} 个类别)`"
-          type="info"
-          show-icon
-          :closable="false"
-        />
+  <div class="page">
+    <div class="page-heading">
+      <div>
+        <span class="eyebrow">MODEL REGISTRY</span>
+        <h1>模型资源</h1>
+        <p>{{ models.length }} 个模型 · {{ scenes.length }} 类检测场景</p>
       </div>
-    </el-card>
-
-    <!-- 自动切换命名规则 -->
-    <el-card class="rules-card" shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>场景模型命名规则</span>
-          <el-tag type="primary" effect="plain">用于检测页自动切换模型</el-tag>
-        </div>
-      </template>
-
-      <el-table :data="namingRules" style="width: 100%">
-        <el-table-column prop="scene" label="检测场景" width="130" />
-        <el-table-column prop="recommended" label="推荐文件名" min-width="170" />
-        <el-table-column prop="keywords" label="可识别关键词" min-width="240" />
-        <el-table-column prop="note" label="说明" min-width="220" />
-      </el-table>
-
-      <div class="rule-note">
-        上传后无需手动绑定场景。检测页点击对应场景时，系统会按文件名关键词自动查找并加载模型。
+      <div class="actions">
+        <el-button :loading="loading" @click="refresh"
+          ><el-icon><Refresh /></el-icon><span>刷新</span></el-button
+        ><el-button type="primary" @click="uploadOpen = true"
+          ><el-icon><Upload /></el-icon><span>上传模型</span></el-button
+        >
       </div>
-    </el-card>
-
-    <!-- 模型列表 -->
-    <el-card class="models-card" shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>可用模型列表</span>
-          <el-tag type="success">共 {{ models.length }} 个模型</el-tag>
-        </div>
-      </template>
-      
-      <el-table :data="models" v-loading="loading" style="width: 100%">
-        <el-table-column label="模型名称" min-width="200">
-          <template #default="scope">
-            <div class="model-name">
-              <el-icon v-if="scope.row.pretrained" color="#409EFF"><Star /></el-icon>
-              <span>{{ scope.row.name }}</span>
-              <el-tag v-if="scope.row.pretrained" type="primary" size="small">预训练</el-tag>
-              <el-tag v-if="scope.row.path === currentModel.path" type="success" size="small">当前使用</el-tag>
-            </div>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="size_mb" label="大小" width="100">
-          <template #default="scope">
-            <span v-if="scope.row.size_mb > 0">{{ scope.row.size_mb }} MB</span>
-            <span v-else>--</span>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="路径" min-width="200">
-          <template #default="scope">
-            <el-text class="model-path" truncated>{{ scope.row.relative_path }}</el-text>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="修改时间" width="180">
-          <template #default="scope">
-            <span v-if="scope.row.modified > 0">
-              {{ formatDate(scope.row.modified) }}
-            </span>
-            <span v-else>--</span>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="操作" width="200">
-          <template #default="scope">
-            <el-button-group>
-              <el-button 
-                type="primary" 
-                size="small" 
-                @click="loadModel(scope.row)"
-                :disabled="scope.row.path === currentModel.path"
-                :loading="loadingModel === scope.row.path"
+    </div>
+    <el-alert v-if="error" :title="error" type="error" show-icon @close="error = ''" />
+    <section class="active-model">
+      <span class="model-chip"
+        ><el-icon><Cpu /></el-icon
+      ></span>
+      <div>
+        <span class="eyebrow">当前推理模型</span>
+        <h2>{{ fileName(current.path) }}</h2>
+        <span class="mono">{{ current.path || '--' }}</span>
+      </div>
+      <div class="active-model-end">
+        <span class="status-label" :class="{ off: !current.loaded }"
+          ><i class="status-dot" :class="{ off: !current.loaded }"></i
+          >{{ current.loaded ? '已加载' : '未加载' }}</span
+        ><span>{{ current.class_count || 0 }} 个目标类别</span
+        ><el-button
+          v-if="current.loaded"
+          size="small"
+          @click="
+            detail = models.find((m) => m.path === current.path) || {
+              path: current.path,
+              name: fileName(current.path),
+            }
+          "
+          >查看类别</el-button
+        >
+      </div>
+    </section>
+    <div class="toolbar">
+      <el-input v-model="search" clearable placeholder="搜索模型名称" aria-label="搜索模型"
+        ><template #prefix
+          ><el-icon><Search /></el-icon></template></el-input
+      ><el-select v-model="filterScene" aria-label="按场景筛选"
+        ><el-option label="全部场景" value="" /><el-option
+          v-for="s in scenes"
+          :key="s.value"
+          :label="s.label"
+          :value="s.value" /><el-option label="未分类" value="unknown" /></el-select
+      ><el-select v-model="sortBy" aria-label="模型排序"
+        ><el-option label="名称排序" value="name" /><el-option
+          label="最新添加"
+          value="recent" /><el-option label="文件从小到大" value="size"
+      /></el-select>
+    </div>
+    <div class="table-shell" v-loading="loading">
+      <el-table :data="filtered" empty-text="没有符合条件的模型"
+        ><el-table-column label="模型名称" min-width="245"
+          ><template #default="{ row }"
+            ><div class="file-cell">
+              <span class="file-icon"
+                ><el-icon><Cpu /></el-icon
+              ></span>
+              <div class="file-info">
+                <span class="file-name" :title="row.name">{{ row.name }}</span
+                ><small class="mono">{{ row.relative_path || row.path }}</small>
+              </div>
+            </div></template
+          ></el-table-column
+        ><el-table-column label="适用场景" min-width="140"
+          ><template #default="{ row }"
+            ><div class="tag-list">
+              <el-tag
+                v-for="s in modelScenes(row)"
+                :key="s.value"
+                size="small"
+                effect="plain"
+                :style="{ color: s.color }"
+                >{{ s.short }}</el-tag
+              ><span v-if="!modelScenes(row).length" class="muted">未分类</span>
+            </div></template
+          ></el-table-column
+        ><el-table-column label="大小" width="100"
+          ><template #default="{ row }"
+            ><span class="mono">{{ row.size_mb || 0 }} MB</span></template
+          ></el-table-column
+        ><el-table-column label="状态" width="110"
+          ><template #default="{ row }"
+            ><span v-if="current.path === row.path && current.loaded" class="status-label"
+              ><i class="status-dot"></i>使用中</span
+            ><span v-else class="muted">{{ row.pretrained ? '待下载' : '待加载' }}</span></template
+          ></el-table-column
+        ><el-table-column label="操作" width="195" fixed="right"
+          ><template #default="{ row }"
+            ><div class="actions">
+              <el-button
+                size="small"
+                :disabled="!!pending || row.pretrained"
+                :loading="pending === row.path"
+                @click="activate(row)"
+                >{{ current.path === row.path && current.loaded ? '重新加载' : '加载' }}</el-button
+              ><button
+                class="icon-button"
+                aria-label="模型详情"
+                title="模型详情"
+                @click="detail = row"
               >
-                <el-icon><Play /></el-icon>
-                {{ scope.row.path === currentModel.path ? '使用中' : '加载' }}
-              </el-button>
-              
-              <el-button 
-                v-if="!scope.row.pretrained" 
-                type="danger" 
-                size="small" 
-                @click="deleteModel(scope.row)"
-                :disabled="scope.row.path === currentModel.path"
+                <el-icon><InfoFilled /></el-icon></button
+              ><button
+                class="icon-button"
+                aria-label="删除模型"
+                title="删除模型"
+                :disabled="!!pending || current.path === row.path || row.pretrained"
+                @click="remove(row)"
               >
                 <el-icon><Delete /></el-icon>
-                删除
-              </el-button>
-            </el-button-group>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- 上传对话框 -->
-    <el-dialog
-      v-model="showUploadDialog"
-      title="上传模型文件"
-      width="600px"
-      @close="resetUpload"
-    >
-      <el-upload
-        class="upload-demo"
-        drag
-        :action="uploadUrl"
-        :before-upload="beforeUpload"
-        :on-success="handleUploadSuccess"
-        :on-error="handleUploadError"
-        :file-list="fileList"
-        accept=".pt,.onnx,.torchscript,.engine"
-      >
-        <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-        <div class="el-upload__text">
-          将模型文件拖到此处，或<em>点击上传</em>
-        </div>
-        <template #tip>
-          <div class="el-upload__tip">
-            支持 .pt、.onnx、.torchscript、.engine 格式的模型文件，大小不超过 500MB
-          </div>
-        </template>
-      </el-upload>
-      
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showUploadDialog = false">取消</el-button>
-          <el-button type="primary" @click="showUploadDialog = false">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
-
-    <!-- 模型详情对话框 -->
-    <el-dialog
-      v-model="showModelDetail"
-      title="模型详细信息"
-      width="800px"
-    >
-      <div v-if="selectedModel" class="model-detail">
-        <el-descriptions border :column="2">
-          <el-descriptions-item label="模型名称">{{ selectedModel.name }}</el-descriptions-item>
-          <el-descriptions-item label="文件路径">{{ selectedModel.path }}</el-descriptions-item>
-          <el-descriptions-item label="文件大小">{{ selectedModel.size_mb }} MB</el-descriptions-item>
-          <el-descriptions-item label="类别数量">{{ currentModel.class_count }}</el-descriptions-item>
-        </el-descriptions>
-        
-        <el-divider>支持的检测类别</el-divider>
-        <div class="model-classes">
-          <el-tag 
-            v-for="(className, index) in currentModel.classes" 
-            :key="index"
-            class="class-tag"
-            type="info"
-          >
-            {{ className }}
-          </el-tag>
+              </button></div></template></el-table-column
+      ></el-table>
+    </div>
+    <section class="naming-section">
+      <div class="section-head">
+        <h2>场景命名规则</h2>
+        <span class="mono">models/</span>
+      </div>
+      <div class="rules-list">
+        <div v-for="s in scenes" :key="s.value" class="rule-row">
+          <span class="rule-label"
+            ><el-icon :style="{ color: s.color }"><component :is="s.icon" /></el-icon
+            >{{ s.label }}</span
+          ><code>{{ s.value === 'general' ? 'yolov8n.pt / general_yolov8s.pt' : s.file }}</code
+          ><span class="rule-keywords">{{ s.keywords.join(' · ') }}</span>
         </div>
       </div>
-    </el-dialog>
+    </section>
+    <el-dialog
+      v-model="uploadOpen"
+      destroy-on-close
+      @closed="resetUpload"
+      title="上传检测模型"
+      width="510px"
+      :close-on-click-modal="!uploading"
+      :show-close="!uploading"
+      :close-on-press-escape="!uploading"
+      ><el-upload
+        :auto-upload="false"
+        :limit="1"
+        accept=".pt,.onnx,.torchscript"
+        :disabled="uploading"
+        :on-change="selectUpload"
+        :on-remove="() => (uploadFile = null)"
+        :on-exceed="() => ElMessage.warning('请先移除已选文件')"
+        drag
+        ><el-icon class="upload-icon"><UploadFilled /></el-icon>
+        <p>选择或拖入模型文件</p>
+        <small>.pt / .onnx / .torchscript · 小于 100 MB</small></el-upload
+      ><el-form label-position="top" class="upload-name-form"
+        ><el-form-item label="保存文件名"
+          ><el-input
+            v-model="uploadName"
+            :disabled="uploading"
+            placeholder="例如 fire_yolov8s.pt" /></el-form-item
+      ></el-form>
+      <div v-if="uploadName" class="tag-list">
+        <el-tag v-for="s in modelScenes({ name: uploadName })" :key="s.value" effect="plain">{{
+          s.label
+        }}</el-tag
+        ><el-tag v-if="!modelScenes({ name: uploadName }).length" type="warning"
+          >未匹配场景关键词</el-tag
+        >
+      </div>
+      <el-progress v-if="uploading" :percentage="progress" :stroke-width="5" /><template #footer
+        ><el-button :disabled="uploading" @click="uploadOpen = false">取消</el-button
+        ><el-button type="primary" :loading="uploading" :disabled="!uploadFile" @click="upload"
+          >上传</el-button
+        ></template
+      ></el-dialog
+    >
+    <el-dialog
+      :model-value="!!detail"
+      @update:model-value="!$event && (detail = null)"
+      title="模型详情"
+      width="620px"
+      ><template v-if="detail"
+        ><h2>{{ detail.name }}</h2>
+        <p class="mono detail-path">{{ detail.path }}</p>
+        <template v-if="detail.path === current.path && current.loaded"
+          ><div class="section-head">
+            <h3>可识别类别</h3>
+            <small>{{ current.class_count }} 类</small>
+          </div>
+          <div class="tag-list class-list">
+            <el-tag v-for="name in current.classes" :key="name" effect="plain" type="info">{{
+              name
+            }}</el-tag>
+          </div></template
+        ><el-empty v-else description="模型加载后可查看类别" :image-size="60" /></template
+      ><template #footer
+        ><el-button @click="detail = null">关闭</el-button
+        ><el-button
+          v-if="detail && detail.path !== current.path"
+          type="primary"
+          :loading="pending === detail.path"
+          @click="activate(detail)"
+          >加载模型</el-button
+        ></template
+      ></el-dialog
+    >
   </div>
 </template>
-
-<script>
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Refresh, 
-  Upload, 
-  Star, 
-  VideoPlay, 
-  Delete, 
-  UploadFilled 
-} from '@element-plus/icons-vue'
-
-export default {
-  name: 'ModelManager',
-  components: {
-    Refresh,
-    Upload,
-    Star,
-    Play: VideoPlay,
-    Delete,
-    UploadFilled
-  },
-  data() {
-    return {
-      models: [],
-      currentModel: {
-        path: '',
-        class_count: 0,
-        classes: []
-      },
-      loading: false,
-      loadingModel: '',
-      showUploadDialog: false,
-      showModelDetail: false,
-      selectedModel: null,
-      fileList: [],
-      uploadUrl: '/api/models/upload',
-      namingRules: [
-        {
-          scene: '通用检测',
-          recommended: '默认使用 models/yolov8n.pt',
-          keywords: 'general / common / 通用',
-          note: '通用检测按钮会优先加载默认 models/yolov8n.pt'
-        },
-        {
-          scene: '无人机检测',
-          recommended: 'drone_yolov8.pt',
-          keywords: 'drone / uav / 无人机 / 飞行器',
-          note: '检测无人机图片或视频时使用'
-        },
-        {
-          scene: '火灾检测',
-          recommended: 'fire_yolov8.pt',
-          keywords: 'fire / flame / smoke / 火灾 / 火焰 / 烟雾',
-          note: '检测火焰、烟雾等安全风险目标时使用'
-        },
-        {
-          scene: '花卉检测',
-          recommended: 'flower_yolov8.pt',
-          keywords: 'flower / rose / sunflower / tulip / daisy / 花卉',
-          note: '检测花卉类别时使用'
-        },
-        {
-          scene: '病虫害检测',
-          recommended: 'pest_yolov8.pt',
-          keywords: 'pest / disease / leaf / plant / 病虫害 / 病害 / 虫害',
-          note: '检测作物病斑、虫害和叶片状态时使用'
-        }
-      ]
-    }
-  },
-  mounted() {
-    this.loadCurrentModel()
-    this.loadModels()
-  },
-  methods: {
-    async loadModels() {
-      this.loading = true
-      try {
-        const response = await fetch('/api/models')
-        const data = await response.json()
-        
-        if (data.success) {
-          this.models = data.models
-        } else {
-          ElMessage.error(data.message)
-        }
-      } catch (error) {
-        ElMessage.error('加载模型列表失败: ' + error.message)
-      } finally {
-        this.loading = false
-      }
-    },
-    
-    async loadCurrentModel() {
-      try {
-        const response = await fetch('/api/models/current')
-        const data = await response.json()
-        
-        if (data.success) {
-          this.currentModel = data.model_info
-        }
-      } catch (error) {
-        console.error('获取当前模型信息失败:', error)
-      }
-    },
-    
-    async loadModel(model) {
-      this.loadingModel = model.path
-      
-      try {
-        const response = await fetch('/api/models/load', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model_path: model.path
-          })
-        })
-        
-        const data = await response.json()
-        
-        if (data.success) {
-          ElMessage.success(data.message)
-          this.currentModel = data.model_info
-          await this.loadModels() // 刷新列表
-        } else {
-          ElMessage.error(data.message)
-        }
-      } catch (error) {
-        ElMessage.error('加载模型失败: ' + error.message)
-      } finally {
-        this.loadingModel = ''
-      }
-    },
-    
-    async deleteModel(model) {
-      try {
-        await ElMessageBox.confirm(
-          `确定要删除模型 "${model.name}" 吗？此操作不可恢复。`,
-          '删除确认',
-          {
-            confirmButtonText: '确定',
-            cancelButtonText: '取消',
-            type: 'warning'
-          }
-        )
-        
-        const response = await fetch('/api/models/delete', {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model_path: model.path
-          })
-        })
-        
-        const data = await response.json()
-        
-        if (data.success) {
-          ElMessage.success(data.message)
-          await this.loadModels()
-        } else {
-          ElMessage.error(data.message)
-        }
-      } catch (error) {
-        if (error !== 'cancel') {
-          ElMessage.error('删除模型失败: ' + error.message)
-        }
-      }
-    },
-    
-    refreshModels() {
-      this.loadCurrentModel()
-      this.loadModels()
-    },
-    
-    beforeUpload(file) {
-      const isModel = ['pt', 'onnx', 'torchscript', 'engine'].some(ext => 
-        file.name.toLowerCase().endsWith('.' + ext)
+import { api, scenes, modelScenes, fileName } from '../lib/workspace'
+const models = ref([]),
+  current = ref({}),
+  loading = ref(false),
+  error = ref(''),
+  search = ref(''),
+  filterScene = ref(''),
+  sortBy = ref('name'),
+  pending = ref(''),
+  detail = ref(null)
+const uploadOpen = ref(false),
+  uploadFile = ref(null),
+  uploadName = ref(''),
+  uploading = ref(false),
+  progress = ref(0)
+const filtered = computed(() =>
+  models.value
+    .filter((m) => {
+      if (!m.name.toLowerCase().includes(search.value.toLowerCase())) return false
+      const matched = modelScenes(m)
+      return (
+        !filterScene.value ||
+        (filterScene.value === 'unknown'
+          ? !matched.length
+          : matched.some((s) => s.value === filterScene.value))
       )
-      const isLt500M = file.size / 1024 / 1024 < 500
-      
-      if (!isModel) {
-        ElMessage.error('只能上传模型文件 (.pt, .onnx, .torchscript, .engine)!')
-        return false
-      }
-      if (!isLt500M) {
-        ElMessage.error('模型文件大小不能超过 500MB!')
-        return false
-      }
-      
-      return true
-    },
-    
-    handleUploadSuccess(response, file) {
-      if (response.success) {
-        ElMessage.success('模型上传成功!')
-        this.showUploadDialog = false
-        this.loadModels()
-      } else {
-        ElMessage.error(response.message)
-      }
-    },
-    
-    handleUploadError(error) {
-      ElMessage.error('上传失败: ' + error.message)
-    },
-    
-    resetUpload() {
-      this.fileList = []
-    },
-    
-    formatDate(timestamp) {
-      return new Date(timestamp * 1000).toLocaleString('zh-CN')
-    },
-    
-    showModelDetails(model) {
-      this.selectedModel = model
-      this.showModelDetail = true
-    }
+    })
+    .sort((a, b) =>
+      sortBy.value === 'size'
+        ? a.size_mb - b.size_mb
+        : sortBy.value === 'recent'
+        ? b.modified - a.modified
+        : a.name.localeCompare(b.name)
+    )
+)
+async function refresh() {
+  loading.value = true
+  error.value = ''
+  try {
+    const [list, active] = await Promise.all([api('/models'), api('/models/current')])
+    models.value = list.models
+    current.value = active.model_info
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loading.value = false
   }
 }
+async function activate(row) {
+  if (pending.value) return
+  pending.value = row.path
+  error.value = ''
+  try {
+    await api('/models/load', { method: 'POST', data: { model_path: row.path } })
+    await refresh()
+    window.dispatchEvent(new Event('model-changed'))
+    ElMessage.success('模型已加载')
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    pending.value = ''
+  }
+}
+async function remove(row) {
+  try {
+    await ElMessageBox.confirm(`删除 ${row.name}？此操作不可恢复。`, '删除模型', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    pending.value = row.path
+    await api('/models/delete', { method: 'DELETE', data: { model_path: row.path } })
+    await refresh()
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') error.value = e.message
+  } finally {
+    pending.value = ''
+  }
+}
+function resetUpload() {
+  uploadFile.value = null
+  uploadName.value = ''
+  progress.value = 0
+}
+function selectUpload(item) {
+  uploadFile.value = item.raw
+  uploadName.value = item.name
+}
+async function upload() {
+  if (!uploadFile.value || uploading.value) return
+  const name = uploadName.value.trim()
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\.(pt|onnx|torchscript)$/i.test(name)) {
+    ElMessage.warning('文件名请使用英文字母、数字、下划线或短横线，并保留模型扩展名')
+    return
+  }
+  if (
+    name.split('.').pop().toLowerCase() !== uploadFile.value.name.split('.').pop().toLowerCase()
+  ) {
+    ElMessage.warning('不能通过修改扩展名转换模型格式')
+    return
+  }
+  if (uploadFile.value.size >= 100 * 1048576) {
+    ElMessage.warning('网页上传限制为 100 MB；更大的模型请放入 models 目录后刷新')
+    return
+  }
+  const form = new FormData()
+  form.append('file', uploadFile.value, name)
+  uploading.value = true
+  progress.value = 0
+  try {
+    await api('/models/upload', {
+      method: 'POST',
+      data: form,
+      timeout: 0,
+      onUploadProgress: (e) => {
+        progress.value = e.total ? Math.round((e.loaded / e.total) * 100) : 0
+      },
+    })
+    uploadOpen.value = false
+    await refresh()
+    ElMessage.success('模型已上传')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    uploading.value = false
+  }
+}
+onMounted(refresh)
+onBeforeRouteLeave(() => {
+  if (pending.value || uploading.value) {
+    ElMessage.info('模型操作完成后可切换页面')
+    return false
+  }
+})
 </script>
-
 <style scoped>
-.model-manager {
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.header-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.current-model-info {
-  margin-top: 20px;
-}
-
-.models-card {
-  margin-bottom: 20px;
-}
-
-.model-name {
+.active-model {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 17px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 25px;
 }
-
-.model-path {
-  font-family: monospace;
+.model-chip {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 7px;
+  background: #e8f0e9;
+  color: #498762;
+  font-size: 28px;
+  flex-shrink: 0;
+}
+.active-model h2 {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.active-model .mono {
+  font-size: 10px;
+  color: #9da79f;
+}
+.active-model-end {
+  margin-left: auto;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 12px;
+  color: #8e9a91;
+  flex-shrink: 0;
+}
+.active-model .eyebrow {
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+.actions .icon-button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  font-size: 15px;
+}
+.icon-button:disabled {
+  opacity: 0.3;
+}
+.naming-section {
+  margin-top: 35px;
+}
+.naming-section h2 {
+  font-size: 15px;
+}
+.rules-list {
+  border-top: 1px solid var(--line);
+}
+.rule-row {
+  padding: 15px 0;
+  display: grid;
+  grid-template-columns: 140px minmax(230px, 1fr) 1.1fr;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
   font-size: 12px;
 }
-
-.model-detail {
-  padding: 20px 0;
-}
-
-.model-classes {
+.rule-label {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  align-items: center;
+  gap: 9px;
 }
-
-.class-tag {
-  margin: 2px;
+.rule-label .el-icon {
+  font-size: 18px;
 }
-
-.upload-demo {
-  width: 100%;
+.rule-row code {
+  font-size: 11px;
+  color: #63786b;
+  overflow-wrap: anywhere;
 }
-
-:deep(.el-upload-dragger) {
-  width: 100%;
+.rule-keywords {
+  font-size: 11px;
+  color: #9aa49d;
 }
-
-:deep(.el-table .el-button-group) {
-  display: flex;
+.upload-icon {
+  font-size: 35px;
+  margin-bottom: 12px;
+  color: #769481;
 }
-
-:deep(.el-table .el-button-group .el-button) {
-  margin-left: 0;
-}
-
-/* ===== 页面美化增强：模型管理页 ===== */
-.model-manager {
-  max-width: 1280px;
-}
-
-.header-card,
-.rules-card,
-.models-card {
-  margin-bottom: 24px;
-}
-
-.card-header {
-  color: #27304f;
-  font-size: 16px;
-  font-weight: 900;
-}
-
-.header-actions {
-  gap: 12px;
-}
-
-.current-model-info {
+.upload-name-form {
   margin-top: 20px;
-  padding: 18px;
-  border: 1px solid rgba(37,99,235,.16);
-  border-radius: 20px;
-  background:
-    linear-gradient(180deg, rgba(239,246,255,.86), rgba(255,255,255,.96));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
 }
-
-.current-model-info :deep(.el-alert) {
-  border: 1px solid rgba(37,99,235,.16);
-  border-radius: 18px;
-  background: #fff;
+.detail-path {
+  margin: 10px 0 24px;
+  color: #8d9d92;
 }
-
-.rules-card :deep(.el-table th.el-table__cell) {
-  background: #f4f7ff !important;
+.class-list {
+  max-height: 350px;
+  overflow-y: auto;
 }
-
-.rule-note {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  color: #52607d;
-  background: linear-gradient(135deg, rgba(239,246,255,.9), rgba(245,243,255,.9));
-  font-size: 13px;
-  line-height: 1.7;
+@media (max-width: 1100px) {
+  .rule-row {
+    grid-template-columns: 120px 1fr;
+  }
+  .rule-keywords {
+    grid-column: 2;
+  }
 }
-
-.model-name {
-  gap: 10px;
-  color: #27304f;
-  font-weight: 800;
+@media (max-width: 760px) {
+  .active-model {
+    flex-wrap: wrap;
+  }
+  .active-model > div {
+    min-width: 0;
+    flex: 1;
+  }
+  .active-model-end {
+    flex-basis: 100% !important;
+    margin: 8px 0 0;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .rule-row {
+    grid-template-columns: 95px minmax(0, 1fr);
+    gap: 9px;
+  }
 }
-
-.model-path {
-  display: inline-flex;
-  max-width: 360px;
-  padding: 5px 9px;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #475569;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.model-detail {
-  padding: 6px 0;
-}
-
-.model-classes {
-  padding: 14px;
-  border-radius: 18px;
-  background: #f8fafc;
-  border: 1px solid rgba(226,232,240,.88);
-}
-
-.class-tag {
-  margin: 3px;
-}
-
-.upload-demo :deep(.el-upload-dragger) {
-  border: 1.5px dashed rgba(37,99,235,.35);
-  border-radius: 22px;
-  background: linear-gradient(180deg, #fff, #f8fafc);
-  transition: all .25s ease;
-}
-
-.upload-demo :deep(.el-upload-dragger:hover) {
-  border-color: #7c83f5;
-  transform: translateY(-2px);
-  box-shadow: 0 18px 40px rgba(37,99,235,.12);
-}
-
-:deep(.el-table .el-button-group) {
-  gap: 6px;
-}
-
-:deep(.el-table .el-button-group .el-button) {
-  margin-left: 0;
-}
-
-</style> 
+</style>

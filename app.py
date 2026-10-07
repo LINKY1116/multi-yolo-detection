@@ -18,6 +18,9 @@ import urllib.request
 import urllib.error
 from urllib.parse import quote_plus
 import pymysql                                            # MySQL 数据库连接驱动
+import math
+from functools import wraps
+from threading import RLock
 
 # 创建 Flask 应用
 app = Flask(__name__)
@@ -119,6 +122,14 @@ cv2 = None
 np = None
 Image = None
 YOLO = None
+model_lock = RLock()
+
+def synchronized_model_operation(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with model_lock:
+            return function(*args, **kwargs)
+    return wrapped
 
 def ensure_vision_dependencies():
     """按需加载视觉检测依赖，避免数据库初始化时强制安装 PyTorch/YOLO。"""
@@ -137,6 +148,7 @@ def ensure_vision_dependencies():
     Image = image_module
     YOLO = yolo_module
 
+@synchronized_model_operation
 def load_yolo_model(model_path=DEFAULT_MODEL_PATH):
     """加载指定的 YOLO 模型文件"""
     global model, current_model_path
@@ -282,11 +294,41 @@ def ensure_database_exists():
         print(f"❌ 无法创建数据库，请检查MySQL连接: {e}")
 
 def get_detection_confidence():
-    """不同场景使用不同检测阈值。病虫害模型精度较低，演示时降低阈值。"""
-    scenario = get_current_model_scenario()
-    if scenario == 'pest':
-        return 0.05
-    return 0.25
+    """优先使用本次请求的阈值，兼容未传参数的旧客户端。"""
+    data = request.get_json(silent=True) if request.is_json else request.form
+    data = data or {}
+    default = 0.05 if get_current_model_scenario() == 'pest' else 0.25
+    try:
+        confidence = float(data.get('confidence', default))
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError('置信度阈值必须是 0.01 到 0.95 之间的数字')
+    if not math.isfinite(confidence) or not 0.01 <= confidence <= 0.95:
+        raise ValueError('置信度阈值必须在 0.01 到 0.95 之间')
+    return confidence
+
+def guard_detection_request(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        # 推理期间固定模型，防止其他页面切换模型导致结果错配。
+        with model_lock:
+            data = (request.get_json(silent=True) if request.is_json else request.form) or {}
+            if not hasattr(data, 'get'):
+                return jsonify({'success': False, 'message': '检测参数格式无效'}), 400
+            expected_model = data.get('model_path')
+            if expected_model and expected_model != current_model_path:
+                return jsonify({'success': False, 'message': '当前模型已在其他页面切换，请重新选择并加载场景模型'}), 409
+            try:
+                confidence = get_detection_confidence()
+            except ValueError as error:
+                return jsonify({'success': False, 'message': str(error)}), 400
+            response = app.make_response(function(*args, **kwargs))
+            payload = response.get_json(silent=True)
+            if payload and payload.get('success'):
+                payload['model_path'] = current_model_path
+                payload['confidence_threshold'] = confidence
+                response.set_data(app.json.dumps(payload))
+            return response
+    return wrapped
 
 def analyze_detections(detections, detection_type='image'):
     """对YOLO检测结果做结构化统计和复核建议"""
@@ -552,15 +594,19 @@ def build_local_report(analysis):
 def build_project_assistant_local_answer(question):
     """小 Y 项目助手的大模型兜底回答。"""
     q = (question or '').lower()
+    if any(keyword in q for keyword in ['阈值', '置信度']):
+        return '检测工作台左侧可以调整本次推理的置信度阈值，范围为 0.01 到 0.95。病虫害默认 0.05，其他场景默认 0.25。调低阈值会保留更多候选目标，也可能增加误检；调节后点击开始检测重新运行。'
+    if any(keyword in q for keyword in ['导出', '下载']):
+        return '检测工作台右上角可导出包含检测参数的 JSON，目标明细旁可下载结果图片或视频。检测记录页可以搜索、按日期和类型筛选，并将筛选结果导出为 CSV；记录详情也支持导出 JSON。'
     if any(keyword in q for keyword in ['模型', '命名', '名字']):
         return '模型命名用于自动切换：drone_yolov8.pt 对应无人机，fire_yolov8.pt 对应火灾，flower_yolov8.pt 对应花卉，pest_yolov8.pt 对应病虫害。通用检测使用默认 models/yolov8n.pt。'
     if any(keyword in q for keyword in ['ai', '角色', '问答']):
         return 'AI 会根据检测页选择的场景切换角色：无人机是低空安全监测助手，火灾是安全预警助手，花卉是花卉识别助手，病虫害是农业植保助手，通用检测是通用目标检测助手。'
     if any(keyword in q for keyword in ['检测', '流程', '怎么用']):
-        return '使用流程是：先在模型管理上传模型，再到检测页选择场景和具体模型，然后上传图片/视频或打开摄像头，检测完成后查看结果并生成 AI 报告或继续问答。'
+        return '先在模型资源上传模型，再到检测工作台选择场景和模型。模型显示已就绪后，选择文件、设置阈值并点击开始检测；实时模式则启动摄像头。结果可切换原图和检测图，也可以生成报告或继续问答。'
     if any(keyword in q for keyword in ['历史', '记录']):
-        return '检测历史页面保存图片和视频检测记录，可以查看检测时间、文件、目标数量、置信度、结果预览，也支持下载和删除记录。'
-    return '系统主要分为：首页、目标检测、模型管理、检测历史和 AI 分析。后端负责 YOLO 推理、文件处理、MySQL 存储和 DeepSeek 调用；前端负责上传、展示、模型切换和问答交互。'
+        return '检测记录页保存图片和视频检测任务，支持文件名和类别搜索、类型和日期筛选、待复核筛选、CSV 导出、详情预览以及单条或批量删除。摄像头实时画面不自动保存到历史记录。'
+    return '系统分为工作概览、检测工作台、检测记录、模型资源。工作概览显示真实任务统计和结果快照，检测工作台支持多场景推理与 AI 分析，检测记录负责筛选与导出，模型资源负责上传、加载和管理。'
 
 def call_deepseek(messages, temperature=0.3, max_tokens=800, api_key=None):
     """调用DeepSeek快速对话模型"""
@@ -706,6 +752,7 @@ def reset_password():
 
 
 @app.route('/api/detect_image', methods=['POST'])
+@guard_detection_request
 def detect_image():
     """图片检测接口：接收上传的图片，调用 YOLO 进行目标检测，返回检测框和结果图片"""
     try:
@@ -778,6 +825,7 @@ def detect_image():
     return jsonify({'success': False, 'message': '不支持的文件格式'}), 400
 
 @app.route('/api/detect_video', methods=['POST'])
+@guard_detection_request
 def detect_video():
     """视频检测接口：接收上传的视频，逐帧检测并绘制检测框，返回处理后的视频和检测历史"""
     try:
@@ -940,6 +988,7 @@ def detect_camera():
     })
 
 @app.route('/api/process_frame', methods=['POST'])
+@guard_detection_request
 def process_frame():
     """前端实时传输摄像头单帧，后端进行 YOLO 检测并返回检测结果"""
     try:
@@ -1117,7 +1166,9 @@ def chat_with_project_assistant():
 
         project_context = {
             'project_name': '多场景 YOLO 智能视觉检测平台',
-            'frontend_pages': ['首页', '目标检测', '检测历史', '模型管理', '小Y检测助手'],
+            'frontend_pages': ['工作概览', '检测工作台', '检测记录', '模型资源', '小Y助手'],
+            'workspace_features': ['概览统计和检测快照', '按次调整推理阈值0.01到0.95', '原图与结果切换', '检测结果JSON导出', '历史文件名及类别搜索', '历史类型日期和待复核筛选', '筛选结果CSV导出', '模型搜索、场景筛选和排序'],
+            'camera_storage': '摄像头实时画面不自动保存到历史记录',
             'backend_modules': ['用户登录注册', 'MySQL数据存储', '图片检测', '视频检测', '摄像头检测', '模型管理', 'AI报告', '智能问答'],
             'scenes': {
                 'general': '通用检测，默认使用 models/yolov8n.pt，对应通用目标检测助手',
@@ -1126,7 +1177,7 @@ def chat_with_project_assistant():
                 'flower': '花卉检测，推荐模型名 flower_yolov8.pt，对应花卉识别助手',
                 'pest': '病虫害检测，推荐模型名 pest_yolov8.pt，对应农业植保助手'
             },
-            'workflow': '上传模型 -> 检测页选择场景 -> 选择具体模型 -> 上传图片/视频或摄像头检测 -> 查看结果 -> AI报告或问答'
+            'workflow': '模型资源上传模型 -> 检测工作台选择场景和模型并等待就绪 -> 选择图片或视频 -> 调整阈值 -> 点击开始检测 -> 查看或导出结果 -> AI报告或问答。摄像头模式点击启动摄像头。'
         }
 
         messages = [
@@ -1148,7 +1199,7 @@ def chat_with_project_assistant():
         ]
 
         try:
-            reply = call_deepseek(messages, temperature=0.3, max_tokens=600)
+            reply = call_deepseek(messages, temperature=0.3, max_tokens=600, api_key=(data.get('api_key') or '').strip())
             return jsonify({'success': True, 'reply': reply, 'ai_enabled': True, 'message': '小Y智能回答生成成功'})
         except Exception as e:
             return jsonify({
@@ -1411,7 +1462,6 @@ if __name__ == '__main__':
     print("👤 默认账号: admin / admin123")
     #  启动 Flask 服务器
     app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False)
-
 
 
 
